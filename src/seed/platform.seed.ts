@@ -49,6 +49,13 @@ export async function seedPlatformData() {
         role: "PLATFORM_ADMIN",
         status: "Active",
       },
+      {
+        name: "Symbosys Admin",
+        email: "info@symbosys.com",
+        password: hashPassword("admin@123"),
+        role: "SUPER_ADMIN",
+        status: "Active",
+      },
     ];
 
     for (const admin of adminUsers) {

@@ -3,7 +3,10 @@ import { asyncHandler } from "../../../../middlewares/error.middleware.ts";
 import { statusCode } from "../../../../types/types.ts";
 import { SuccessResponse } from "../../../../utils/response.util.ts";
 import { CompanyDirectoryService } from "../services/companyDirectory.service.ts";
-import { companyClientSchema } from "../validators/companyDirectory.validator.ts";
+import {
+  companyClientSchema,
+  resetCompanyCredentialsSchema,
+} from "../validators/companyDirectory.validator.ts";
 
 /**
  * @desc    List all client companies (with optional search and status filters)
@@ -90,3 +93,44 @@ export const deleteCompany = asyncHandler(async (req: Request, res: Response) =>
     statusCode.OK
   );
 });
+
+/**
+ * @desc    Reset organization admin credentials (email & password)
+ * @route   POST /api/v1/platform/companies/:id/reset-credentials
+ * @access  Private (Platform Admin)
+ */
+export const resetCompanyCredentials = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const id = req.params.id as string;
+    const parsed = resetCompanyCredentialsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return next(parsed.error);
+    }
+
+    const result = await CompanyDirectoryService.resetCredentials(id, parsed.data);
+    return SuccessResponse(
+      res,
+      "Organization admin credentials reset successfully",
+      result,
+      statusCode.OK
+    );
+  }
+);
+
+/**
+ * @desc    Get current organization admin credentials summary
+ * @route   GET /api/v1/platform/companies/:id/credentials
+ * @access  Private (Platform Admin)
+ */
+export const getCompanyCredentials = asyncHandler(
+  async (req: Request, res: Response) => {
+    const id = req.params.id as string;
+    const result = await CompanyDirectoryService.getCredentials(id);
+    return SuccessResponse(
+      res,
+      "Organization admin credentials retrieved successfully",
+      result,
+      statusCode.OK
+    );
+  }
+);

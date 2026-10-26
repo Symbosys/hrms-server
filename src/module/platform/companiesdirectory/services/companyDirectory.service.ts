@@ -3,7 +3,10 @@ import { prisma } from "../../../../db/prisma.ts";
 import { statusCode } from "../../../../types/types.ts";
 import { ErrorResponse } from "../../../../utils/response.util.ts";
 import { CompanyDirectoryRepository } from "../repo/companyDirectory.repo.ts";
-import type { CompanyClientInput } from "../validators/companyDirectory.validator.ts";
+import type {
+  CompanyClientInput,
+  ResetCompanyCredentialsInput,
+} from "../validators/companyDirectory.validator.ts";
 
 /**
  * Hash password using Node.js native crypto module (SHA256)
@@ -183,5 +186,356 @@ export class CompanyDirectoryService {
     }
     await CompanyDirectoryRepository.deleteCompany(id);
     return { success: true, message: "Company deleted successfully" };
+  }
+
+  /**
+   * Reset credentials (Email and/or Password) for an Organization Admin.
+   * Can be invoked by companyId (platform_companies) or organizationId (organizations).
+   */
+  static async resetCredentials(companyId: string, data: ResetCompanyCredentialsInput) {
+    const rawPassword = (data.newPassword || data.password || "").trim();
+    if (!rawPassword || rawPassword.length < 6) {
+      throw new ErrorResponse("Password is required and must be at least 6 characters long", statusCode.Bad_Request);
+    }
+
+    const rawEmail = (data.newEmail || data.email || "").trim();
+    const cleanEmail = rawEmail ? rawEmail.toLowerCase() : undefined;
+
+    // 1. Resolve Organization:
+    let organization = await prisma.organization.findUnique({
+      where: { id: companyId },
+    });
+
+    let platformCompany: any = null;
+
+    if (!organization) {
+      const pComp = await prisma.platformCompany.findUnique({
+        where: { id: companyId },
+      });
+      if (pComp) {
+        platformCompany = pComp;
+        if (pComp.organizationId) {
+          organization = await prisma.organization.findUnique({
+            where: { id: pComp.organizationId },
+          });
+        }
+        if (!organization) {
+          organization = await prisma.organization.findFirst({
+            where: {
+              OR: [
+                { name: pComp.name },
+                { email: pComp.contactEmail }
+              ]
+            }
+          });
+        }
+      }
+    }
+
+    if (!organization) {
+      const rawComp = await CompanyDirectoryRepository.findCompanyById(companyId);
+      if (rawComp) {
+        platformCompany = rawComp;
+        organization = await prisma.organization.findFirst({
+          where: {
+            OR: [
+              { id: rawComp.id },
+              { name: rawComp.name },
+              { email: rawComp.contactEmail }
+            ]
+          }
+        });
+      }
+    }
+
+    if (!organization) {
+      throw new ErrorResponse(`Organization with ID "${companyId}" not found`, statusCode.Not_Found);
+    }
+
+    // 2. Resolve Admin User:
+    let membership = await prisma.membership.findFirst({
+      where: {
+        organizationId: organization.id,
+        role: { name: "SUPER_ADMIN" }
+      },
+      include: { user: true, role: true }
+    });
+
+    if (!membership) {
+      membership = await prisma.membership.findFirst({
+        where: { organizationId: organization.id },
+        include: { user: true, role: true }
+      });
+    }
+
+    let adminUser = membership?.user || null;
+
+    if (!adminUser && organization.email) {
+      adminUser = await prisma.user.findFirst({
+        where: { email: { equals: organization.email, mode: "insensitive" } },
+      });
+    }
+
+    if (!adminUser && platformCompany?.contactEmail) {
+      adminUser = await prisma.user.findFirst({
+        where: { email: { equals: platformCompany.contactEmail, mode: "insensitive" } },
+      });
+    }
+
+    const hashedPassword = hashPassword(rawPassword);
+    const targetEmail = cleanEmail || adminUser?.email || organization.email || platformCompany?.contactEmail;
+
+    if (!targetEmail) {
+      throw new ErrorResponse("An email address must be specified for the organization admin", statusCode.Bad_Request);
+    }
+
+    // Email conflict check
+    if (adminUser && adminUser.email && adminUser.email.toLowerCase() !== targetEmail.toLowerCase()) {
+      const emailConflict = await prisma.user.findFirst({
+        where: {
+          email: { equals: targetEmail, mode: "insensitive" },
+          NOT: { id: adminUser.id }
+        }
+      });
+      if (emailConflict) {
+        throw new ErrorResponse(`Email "${targetEmail}" is already registered to another user`, statusCode.Conflict);
+      }
+    }
+
+    if (!adminUser) {
+      const existingUser = await prisma.user.findFirst({
+        where: { email: { equals: targetEmail, mode: "insensitive" } }
+      });
+      if (existingUser) {
+        adminUser = existingUser;
+      }
+    }
+
+    // 3. Atomically update credentials in transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Ensure org-scoped SUPER_ADMIN role exists
+      let superAdminRole = await tx.role.findFirst({
+        where: {
+          organizationId: organization.id,
+          name: "SUPER_ADMIN",
+        },
+      });
+
+      if (!superAdminRole) {
+        const allPermissions = await tx.permission.findMany();
+        superAdminRole = await tx.role.create({
+          data: {
+            name: "SUPER_ADMIN",
+            description: `Super Admin role for ${organization.name} — full access to all modules`,
+            isSystem: true,
+            organizationId: organization.id,
+            permissions: {
+              connect: allPermissions.map((p) => ({ id: p.id })),
+            },
+          },
+        });
+      }
+
+      let updatedUser;
+      if (adminUser) {
+        updatedUser = await tx.user.update({
+          where: { id: adminUser.id },
+          data: {
+            email: targetEmail,
+            password: hashedPassword,
+            roleId: superAdminRole.id,
+            updatedAt: new Date(),
+          },
+        });
+      } else {
+        updatedUser = await tx.user.create({
+          data: {
+            name: `${organization.name} Admin`,
+            email: targetEmail,
+            password: hashedPassword,
+            roleId: superAdminRole.id,
+          },
+        });
+      }
+
+      // Ensure membership is active and linked to SUPER_ADMIN role
+      const existingMembership = await tx.membership.findFirst({
+        where: {
+          userId: updatedUser.id,
+          organizationId: organization.id,
+        },
+      });
+
+      if (!existingMembership) {
+        await tx.membership.create({
+          data: {
+            userId: updatedUser.id,
+            organizationId: organization.id,
+            roleId: superAdminRole.id,
+            status: "ACTIVE",
+          },
+        });
+      } else if (existingMembership.roleId !== superAdminRole.id || existingMembership.status !== "ACTIVE") {
+        await tx.membership.update({
+          where: { id: existingMembership.id },
+          data: {
+            roleId: superAdminRole.id,
+            status: "ACTIVE",
+          },
+        });
+      }
+
+      // Update organization email
+      await tx.organization.update({
+        where: { id: organization.id },
+        data: {
+          email: targetEmail,
+          updatedAt: new Date(),
+        },
+      });
+
+      // Update platform_companies table record if exists
+      await tx.platformCompany.updateMany({
+        where: {
+          OR: [
+            { organizationId: organization.id },
+            { id: companyId },
+            { name: organization.name },
+          ],
+        },
+        data: {
+          contactEmail: targetEmail,
+          organizationId: organization.id,
+          updatedAt: new Date(),
+        },
+      });
+
+      // Update any employee record linked to this user or email
+      await tx.employee.updateMany({
+        where: {
+          OR: [
+            { userId: updatedUser.id },
+            { email: { equals: targetEmail, mode: "insensitive" } },
+          ],
+        },
+        data: {
+          email: targetEmail,
+          password: hashedPassword,
+          organizationId: organization.id,
+          updatedAt: new Date(),
+        },
+      });
+
+      return {
+        organizationId: organization.id,
+        organizationName: organization.name,
+        adminUser: {
+          id: updatedUser.id,
+          name: updatedUser.name || `${organization.name} Admin`,
+          email: updatedUser.email,
+        },
+        temporaryPassword: rawPassword,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+
+    console.log(`[Credentials Reset] Credentials updated for organization "${result.organizationName}": Email=${result.adminUser.email}`);
+    return result;
+  }
+
+  /**
+   * Get current credentials and admin details for an organization
+   */
+  static async getCredentials(companyId: string) {
+    let organization = await prisma.organization.findUnique({
+      where: { id: companyId },
+    });
+
+    let platformCompany: any = null;
+
+    if (!organization) {
+      const pComp = await prisma.platformCompany.findUnique({
+        where: { id: companyId },
+      });
+      if (pComp) {
+        platformCompany = pComp;
+        if (pComp.organizationId) {
+          organization = await prisma.organization.findUnique({
+            where: { id: pComp.organizationId },
+          });
+        }
+        if (!organization) {
+          organization = await prisma.organization.findFirst({
+            where: {
+              OR: [
+                { name: pComp.name },
+                { email: pComp.contactEmail }
+              ]
+            }
+          });
+        }
+      }
+    }
+
+    if (!organization) {
+      const rawComp = await CompanyDirectoryRepository.findCompanyById(companyId);
+      if (rawComp) {
+        platformCompany = rawComp;
+        organization = await prisma.organization.findFirst({
+          where: {
+            OR: [
+              { id: rawComp.id },
+              { name: rawComp.name },
+              { email: rawComp.contactEmail }
+            ]
+          }
+        });
+      }
+    }
+
+    if (!organization) {
+      throw new ErrorResponse(`Organization with ID "${companyId}" not found`, statusCode.Not_Found);
+    }
+
+    let membership = await prisma.membership.findFirst({
+      where: {
+        organizationId: organization.id,
+        role: { name: "SUPER_ADMIN" }
+      },
+      include: { user: true, role: true }
+    });
+
+    if (!membership) {
+      membership = await prisma.membership.findFirst({
+        where: { organizationId: organization.id },
+        include: { user: true, role: true }
+      });
+    }
+
+    let adminUser = membership?.user || null;
+    if (!adminUser && organization.email) {
+      adminUser = await prisma.user.findFirst({
+        where: { email: { equals: organization.email, mode: "insensitive" } }
+      });
+    }
+    if (!adminUser && platformCompany?.contactEmail) {
+      adminUser = await prisma.user.findFirst({
+        where: { email: { equals: platformCompany.contactEmail, mode: "insensitive" } }
+      });
+    }
+
+    return {
+      organizationId: organization.id,
+      organizationName: organization.name,
+      adminUser: adminUser ? {
+        id: adminUser.id,
+        name: adminUser.name,
+        email: adminUser.email,
+        phone: adminUser.phone,
+        hasPasswordSet: !!adminUser.password,
+      } : null,
+      contactEmail: organization.email || platformCompany?.contactEmail || null,
+      status: organization.status,
+    };
   }
 }

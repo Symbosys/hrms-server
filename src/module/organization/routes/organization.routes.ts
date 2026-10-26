@@ -15,6 +15,10 @@ import {
   removeMember,
   updateMembership,
 } from "../controllers/membership.controller.ts";
+import {
+  resetCompanyCredentials,
+  getCompanyCredentials,
+} from "../../platform/companiesdirectory/controllers/companyDirectory.controller.ts";
 
 const router = Router();
 
@@ -30,6 +34,10 @@ router.use(protect);
 router.get("/me", listMyOrganizations);
 
 router.get("/", listOrganizations);
+
+// Platform Admin can reset credentials or view current admin credentials for an organization
+router.get("/:id/credentials", getCompanyCredentials);
+router.post("/:id/reset-credentials", resetCompanyCredentials);
 
 router
   .route("/:id")

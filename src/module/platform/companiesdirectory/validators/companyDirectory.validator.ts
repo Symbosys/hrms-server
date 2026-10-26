@@ -19,3 +19,16 @@ export const companyClientSchema = z.object({
 });
 
 export type CompanyClientInput = z.infer<typeof companyClientSchema>;
+
+export const resetCompanyCredentialsSchema = z.object({
+  newEmail: z.string().email("Invalid email format").optional().or(z.literal("")),
+  newPassword: z.string().min(6, "Password must be at least 6 characters long").optional(),
+  // Aliases for frontend flexibility
+  email: z.string().email("Invalid email format").optional().or(z.literal("")),
+  password: z.string().min(6, "Password must be at least 6 characters long").optional(),
+}).refine((data) => data.newPassword || data.password, {
+  message: "Password is required and must be at least 6 characters long",
+  path: ["newPassword"],
+});
+
+export type ResetCompanyCredentialsInput = z.infer<typeof resetCompanyCredentialsSchema>;

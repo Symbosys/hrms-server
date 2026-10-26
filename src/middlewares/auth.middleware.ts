@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import env from "../config/env.config";
 import { prisma } from "../db/prisma.ts";
 import { PlatformRepository } from "../module/platform/repo/platform.repo.ts";
+import { AdminUserRepository } from "../module/admin/repo/admin.repo.ts";
 import type { PermissionName } from "../types/permission.ts";
 import { verifyToken } from "../utils/jwt.util";
 import { ErrorResponse } from "../utils/response.util";
@@ -58,8 +59,8 @@ export const protect = asyncHandler(async (req: AuthenticatedRequest, res: Respo
     const decoded = verifyToken(token, jwtSecret);
     console.log("[Auth Middleware] Token verified successfully. Decoded payload:", decoded);
 
-    // Check if explicit platform admin token (contains role PLATFORM_ADMIN or isPlatformAdmin flag)
-    if (decoded.isPlatformAdmin || decoded.role === "PLATFORM_ADMIN") {
+    // Check if explicit platform admin token (contains role PLATFORM_ADMIN, isPlatformAdmin flag, or admin type)
+    if (decoded.isPlatformAdmin || decoded.role === "PLATFORM_ADMIN" || decoded.type === "admin") {
       req.user = {
         id: decoded.id,
         email: decoded.email,
@@ -123,14 +124,25 @@ export const protect = asyncHandler(async (req: AuthenticatedRequest, res: Respo
     }
 
     if (!user) {
-      // Fallback check: verify if the token's decoded.id corresponds to a Platform Admin in platform_admins table
+      // Fallback check: verify if the token's decoded.id corresponds to a Platform Admin in platform_admins or admin_users table
       if (decoded.id) {
         const platformAdmin = await PlatformRepository.findById(decoded.id);
         if (platformAdmin) {
           req.user = {
             id: platformAdmin.id,
             email: platformAdmin.email,
-            role: { name: platformAdmin.role || "SUPER_ADMIN" },
+            role: { name: platformAdmin.role || "PLATFORM_ADMIN" },
+            isPlatformAdmin: true,
+          };
+          return next();
+        }
+
+        const adminUser = await AdminUserRepository.findById(decoded.id);
+        if (adminUser) {
+          req.user = {
+            id: adminUser.id,
+            email: adminUser.email,
+            role: { name: adminUser.role || "PLATFORM_ADMIN" },
             isPlatformAdmin: true,
           };
           return next();

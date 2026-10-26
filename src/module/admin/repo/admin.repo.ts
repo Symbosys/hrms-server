@@ -50,11 +50,12 @@ export class AdminUserRepository {
   }
 
   static async findByEmail(email: string) {
+    const cleanEmail = (email || "").trim().toLowerCase();
     await this.ensureTable();
     try {
       if ((prisma as any).adminUser) {
         const admin = await (prisma as any).adminUser.findUnique({
-          where: { email: email.toLowerCase() },
+          where: { email: cleanEmail },
         });
         if (admin) return admin;
       }
@@ -64,8 +65,8 @@ export class AdminUserRepository {
 
     try {
       const res = await prisma.$queryRawUnsafe<any[]>(
-        `SELECT * FROM "admin_users" WHERE LOWER("email") = LOWER($1) LIMIT 1`,
-        email
+        `SELECT * FROM "admin_users" WHERE LOWER(TRIM("email")) = LOWER($1) LIMIT 1`,
+        cleanEmail
       );
       return res && res.length > 0 ? res[0] : null;
     } catch (err) {

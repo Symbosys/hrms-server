@@ -59,7 +59,27 @@ export class CompanyDirectoryRepository {
       `SELECT * FROM "platform_companies" WHERE "id" = $1 LIMIT 1`,
       id
     );
-    return res && res.length > 0 ? res[0] : null;
+    if (res && res.length > 0) return res[0];
+
+    const orgRes = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT 
+        o.id,
+        o.name,
+        COALESCE(NULLIF(o.industry, ''), 'Enterprise Solutions') AS industry,
+        (SELECT COUNT(*)::int FROM "memberships" m WHERE m."organizationId" = o.id) AS "employeeCount",
+        'Enterprise' AS "licenseTier",
+        CASE WHEN UPPER(o.status::text) = 'ACTIVE' THEN 'Active' ELSE 'Inactive' END AS status,
+        COALESCE(o.email, '') AS "contactEmail",
+        TO_CHAR(o."createdAt", 'Mon DD, YYYY') AS "onboardedDate",
+        'BuildingIcon' AS "iconName",
+        '#2563eb' AS "iconColor",
+        '#dbeafe' AS "iconBg",
+        o."createdAt"
+       FROM "organizations" o
+       WHERE o.id = $1 LIMIT 1`,
+      id
+    );
+    return orgRes && orgRes.length > 0 ? orgRes[0] : null;
   }
 
   static async createCompany(id: string, data: CompanyClientInput) {

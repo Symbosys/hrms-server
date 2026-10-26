@@ -15,6 +15,8 @@ import {
   removeEmployeeFamilyMember,
   getEmployeeExit,
   saveEmployeeExit,
+  getEmployeeCredentials,
+  resetEmployeeCredentials,
 } from "../controller/employee.controller.ts";
 
 const router = Router();
@@ -28,6 +30,10 @@ router.get("/:id", hasPermission("VIEW_EMPLOYEE_DIRECTORY", "VIEW_EMPLOYEE_MASTE
 router.post("/", hasPermission("CREATE_EMPLOYEES"), createEmployee);
 router.put("/:id", hasPermission("UPDATE_EMPLOYEE_MASTER", "UPDATE_EMPLOYEES"), updateEmployee);
 router.delete("/:id", hasPermission("DELETE_EMPLOYEES"), deleteEmployee);
+
+// Credentials Management (Org Admin or HR can reset employee credentials)
+router.get("/:id/credentials", getEmployeeCredentials);
+router.post("/:id/reset-credentials", hasPermission("UPDATE_EMPLOYEES", "UPDATE_EMPLOYEE_MASTER", "MANAGE_EMPLOYEES"), resetEmployeeCredentials);
 
 // Salary Details routes
 router.get("/:id/salary", getEmployeeSalary);

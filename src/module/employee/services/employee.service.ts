@@ -431,4 +431,186 @@ export class EmployeeService {
 
     return exitRecord;
   }
+
+  // Credentials Management for Organization Admin / HR
+  static async resetEmployeeCredentials(
+    employeeId: string,
+    data: { newEmail?: string | null; newPassword?: string | null; email?: string | null; password?: string | null },
+    requestingUser?: any
+  ) {
+    const employee = await EmployeeRepository.findById(employeeId);
+    if (!employee) {
+      throw new ErrorResponse("Employee not found", statusCode.Not_Found);
+    }
+
+    // Multi-tenancy check: requesting user must belong to same organization (unless platform admin)
+    if (
+      requestingUser &&
+      !requestingUser.isPlatformAdmin &&
+      requestingUser.role?.name !== "PLATFORM_ADMIN" &&
+      employee.organizationId &&
+      requestingUser.organizationId &&
+      employee.organizationId !== requestingUser.organizationId
+    ) {
+      throw new ErrorResponse("You do not have permission to manage credentials for this employee", statusCode.Forbidden);
+    }
+
+    const emailToSet = (data.newEmail || data.email)?.trim().toLowerCase();
+    let plainPassword = (data.newPassword || data.password)?.trim();
+
+    if (!plainPassword) {
+      // Auto-generate strong secure password
+      plainPassword = `Emp@${crypto.randomBytes(3).toString("hex").toUpperCase()}!`;
+    }
+
+    const hashedPassword = crypto.createHash("sha256").update(plainPassword).digest("hex");
+
+    // If email is changing, check for uniqueness across employees and users
+    if (emailToSet && emailToSet !== employee.email?.toLowerCase()) {
+      const existingEmployeeWithEmail = await prisma.employee.findFirst({
+        where: {
+          email: { equals: emailToSet, mode: "insensitive" },
+          NOT: { id: employeeId },
+        },
+      });
+      if (existingEmployeeWithEmail) {
+        throw new ErrorResponse(`Email '${emailToSet}' is already assigned to another employee`, statusCode.Conflict);
+      }
+
+      const existingUserWithEmail = await prisma.user.findFirst({
+        where: {
+          email: { equals: emailToSet, mode: "insensitive" },
+          ...(employee.userId ? { NOT: { id: employee.userId } } : {}),
+        },
+      });
+      if (existingUserWithEmail) {
+        throw new ErrorResponse(`Email '${emailToSet}' is already linked to another user account`, statusCode.Conflict);
+      }
+    }
+
+    const finalEmail = emailToSet || employee.email;
+
+    // 1. Update Employee table
+    const updatedEmployee = await prisma.employee.update({
+      where: { id: employeeId },
+      data: {
+        ...(emailToSet ? { email: finalEmail } : {}),
+        password: hashedPassword,
+      },
+      include: {
+        department: true,
+        user: { include: { role: true } },
+      },
+    });
+
+    // 2. Synchronize User table (and organization membership)
+    let userAccount: any = null;
+    if (employee.userId) {
+      userAccount = await prisma.user.update({
+        where: { id: employee.userId },
+        data: {
+          ...(emailToSet ? { email: finalEmail } : {}),
+          password: hashedPassword,
+        },
+      }).catch((err) => {
+        console.warn("[Employee Reset] Could not update linked user:", err.message);
+        return null;
+      });
+    } else {
+      // Search user by email or phone
+      const existingUser = await prisma.user.findFirst({
+        where: {
+          OR: [
+            finalEmail ? { email: { equals: finalEmail, mode: "insensitive" } } : null,
+            employee.phone ? { phone: employee.phone } : null,
+          ].filter(Boolean) as any[],
+        },
+      });
+
+      if (existingUser) {
+        userAccount = await prisma.user.update({
+          where: { id: existingUser.id },
+          data: {
+            password: hashedPassword,
+            ...(emailToSet ? { email: finalEmail } : {}),
+          },
+        });
+        await prisma.employee.update({
+          where: { id: employeeId },
+          data: { userId: existingUser.id },
+        });
+      } else {
+        const defaultRole = await prisma.role.findFirst({
+          where: { name: "EMPLOYEE" },
+        });
+
+        userAccount = await prisma.user.create({
+          data: {
+            name: employee.name,
+            email: finalEmail,
+            phone: employee.phone || null,
+            password: hashedPassword,
+            roleId: defaultRole?.id || null,
+          },
+        }).catch((err) => {
+          console.warn("[Employee Reset] Could not auto-create user for employee:", err.message);
+          return null;
+        });
+
+        if (userAccount) {
+          await prisma.employee.update({
+            where: { id: employeeId },
+            data: { userId: userAccount.id },
+          });
+
+          if (employee.organizationId) {
+            await prisma.organizationMembership.create({
+              data: {
+                userId: userAccount.id,
+                organizationId: employee.organizationId,
+                roleId: defaultRole?.id || null,
+                status: "ACTIVE",
+              },
+            }).catch((err) => console.warn("[Employee Reset] Membership create error:", err.message));
+          }
+        }
+      }
+    }
+
+    return {
+      employeeId: updatedEmployee.id,
+      employeeName: updatedEmployee.name,
+      email: finalEmail,
+      temporaryPassword: plainPassword,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  static async getEmployeeCredentials(employeeId: string, requestingUser?: any) {
+    const employee = await EmployeeRepository.findById(employeeId);
+    if (!employee) {
+      throw new ErrorResponse("Employee not found", statusCode.Not_Found);
+    }
+
+    if (
+      requestingUser &&
+      !requestingUser.isPlatformAdmin &&
+      requestingUser.role?.name !== "PLATFORM_ADMIN" &&
+      employee.organizationId &&
+      requestingUser.organizationId &&
+      employee.organizationId !== requestingUser.organizationId
+    ) {
+      throw new ErrorResponse("You do not have permission to view credentials for this employee", statusCode.Forbidden);
+    }
+
+    return {
+      employeeId: employee.id,
+      employeeName: employee.name,
+      email: employee.email,
+      hasPasswordSet: !!employee.password,
+      organizationId: employee.organizationId,
+      userId: employee.userId,
+      status: employee.status,
+    };
+  }
 }

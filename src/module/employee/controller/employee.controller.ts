@@ -7,6 +7,7 @@ import { EmployeeService } from "../services/employee.service.ts";
 import {
   addFamilyMemberSchema,
   createEmployeeSchema,
+  resetEmployeeCredentialsSchema,
   saveEmployeeExitSchema,
   updateEmployeeSchema,
   updatePersonalSchema,
@@ -308,3 +309,51 @@ export const saveEmployeeExit = asyncHandler(async (req: any, res: Response, nex
     statusCode.OK
   );
 });
+
+/**
+ * @desc    Reset employee email and/or password (by Org Admin or HR)
+ * @route   POST /api/v1/employees/:id/reset-credentials
+ * @access  Protected
+ */
+export const resetEmployeeCredentials = asyncHandler(async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  const id = req.params.id as string;
+  if (!id) {
+    return next(new ErrorResponse("Employee ID is required", statusCode.Bad_Request));
+  }
+
+  const parsed = resetEmployeeCredentialsSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return next(parsed.error);
+  }
+
+  const result = await EmployeeService.resetEmployeeCredentials(id, parsed.data, req.user);
+
+  return SuccessResponse(
+    res,
+    "Employee login credentials reset successfully",
+    result,
+    statusCode.OK
+  );
+});
+
+/**
+ * @desc    Get employee credentials metadata
+ * @route   GET /api/v1/employees/:id/credentials
+ * @access  Protected
+ */
+export const getEmployeeCredentials = asyncHandler(async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  const id = req.params.id as string;
+  if (!id) {
+    return next(new ErrorResponse("Employee ID is required", statusCode.Bad_Request));
+  }
+
+  const result = await EmployeeService.getEmployeeCredentials(id, req.user);
+
+  return SuccessResponse(
+    res,
+    "Employee credentials retrieved successfully",
+    result,
+    statusCode.OK
+  );
+});
+

@@ -256,3 +256,12 @@ export const saveEmployeeExitSchema = z.object({
   settledDate: optionalDateSchema,
   netPayable: z.number().optional().nullable(),
 });
+
+export const resetEmployeeCredentialsSchema = z.object({
+  newEmail: z.string().email("Invalid email format").optional().nullable(),
+  newPassword: z.string().min(6, "Password must be at least 6 characters").optional().nullable(),
+  email: z.string().email("Invalid email format").optional().nullable(),
+  password: z.string().min(6, "Password must be at least 6 characters").optional().nullable(),
+});
+
+export type ResetEmployeeCredentialsInput = z.infer<typeof resetEmployeeCredentialsSchema>;

@@ -12742,6 +12742,146 @@ var EmployeeService = class {
     });
     return exitRecord;
   }
+  // Credentials Management for Organization Admin / HR
+  static async resetEmployeeCredentials(employeeId, data, requestingUser) {
+    const employee = await EmployeeRepository.findById(employeeId);
+    if (!employee) {
+      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+    }
+    if (requestingUser && !requestingUser.isPlatformAdmin && requestingUser.role?.name !== "PLATFORM_ADMIN" && employee.organizationId && requestingUser.organizationId && employee.organizationId !== requestingUser.organizationId) {
+      throw new ErrorResponse("You do not have permission to manage credentials for this employee", 403 /* Forbidden */);
+    }
+    const emailToSet = (data.newEmail || data.email)?.trim().toLowerCase();
+    let plainPassword = (data.newPassword || data.password)?.trim();
+    if (!plainPassword) {
+      plainPassword = `Emp@${crypto4.randomBytes(3).toString("hex").toUpperCase()}!`;
+    }
+    const hashedPassword = crypto4.createHash("sha256").update(plainPassword).digest("hex");
+    if (emailToSet && emailToSet !== employee.email?.toLowerCase()) {
+      const existingEmployeeWithEmail = await prisma.employee.findFirst({
+        where: {
+          email: { equals: emailToSet, mode: "insensitive" },
+          NOT: { id: employeeId }
+        }
+      });
+      if (existingEmployeeWithEmail) {
+        throw new ErrorResponse(`Email '${emailToSet}' is already assigned to another employee`, 409 /* Conflict */);
+      }
+      const existingUserWithEmail = await prisma.user.findFirst({
+        where: {
+          email: { equals: emailToSet, mode: "insensitive" },
+          ...employee.userId ? { NOT: { id: employee.userId } } : {}
+        }
+      });
+      if (existingUserWithEmail) {
+        throw new ErrorResponse(`Email '${emailToSet}' is already linked to another user account`, 409 /* Conflict */);
+      }
+    }
+    const finalEmail = emailToSet || employee.email;
+    const updatedEmployee = await prisma.employee.update({
+      where: { id: employeeId },
+      data: {
+        ...emailToSet ? { email: finalEmail } : {},
+        password: hashedPassword
+      },
+      include: {
+        department: true,
+        user: { include: { role: true } }
+      }
+    });
+    let userAccount = null;
+    if (employee.userId) {
+      userAccount = await prisma.user.update({
+        where: { id: employee.userId },
+        data: {
+          ...emailToSet ? { email: finalEmail } : {},
+          password: hashedPassword
+        }
+      }).catch((err) => {
+        console.warn("[Employee Reset] Could not update linked user:", err.message);
+        return null;
+      });
+    } else {
+      const existingUser = await prisma.user.findFirst({
+        where: {
+          OR: [
+            finalEmail ? { email: { equals: finalEmail, mode: "insensitive" } } : null,
+            employee.phone ? { phone: employee.phone } : null
+          ].filter(Boolean)
+        }
+      });
+      if (existingUser) {
+        userAccount = await prisma.user.update({
+          where: { id: existingUser.id },
+          data: {
+            password: hashedPassword,
+            ...emailToSet ? { email: finalEmail } : {}
+          }
+        });
+        await prisma.employee.update({
+          where: { id: employeeId },
+          data: { userId: existingUser.id }
+        });
+      } else {
+        const defaultRole = await prisma.role.findFirst({
+          where: { name: "EMPLOYEE" }
+        });
+        userAccount = await prisma.user.create({
+          data: {
+            name: employee.name,
+            email: finalEmail,
+            phone: employee.phone || null,
+            password: hashedPassword,
+            roleId: defaultRole?.id || null
+          }
+        }).catch((err) => {
+          console.warn("[Employee Reset] Could not auto-create user for employee:", err.message);
+          return null;
+        });
+        if (userAccount) {
+          await prisma.employee.update({
+            where: { id: employeeId },
+            data: { userId: userAccount.id }
+          });
+          if (employee.organizationId) {
+            await prisma.organizationMembership.create({
+              data: {
+                userId: userAccount.id,
+                organizationId: employee.organizationId,
+                roleId: defaultRole?.id || null,
+                status: "ACTIVE"
+              }
+            }).catch((err) => console.warn("[Employee Reset] Membership create error:", err.message));
+          }
+        }
+      }
+    }
+    return {
+      employeeId: updatedEmployee.id,
+      employeeName: updatedEmployee.name,
+      email: finalEmail,
+      temporaryPassword: plainPassword,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+  }
+  static async getEmployeeCredentials(employeeId, requestingUser) {
+    const employee = await EmployeeRepository.findById(employeeId);
+    if (!employee) {
+      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+    }
+    if (requestingUser && !requestingUser.isPlatformAdmin && requestingUser.role?.name !== "PLATFORM_ADMIN" && employee.organizationId && requestingUser.organizationId && employee.organizationId !== requestingUser.organizationId) {
+      throw new ErrorResponse("You do not have permission to view credentials for this employee", 403 /* Forbidden */);
+    }
+    return {
+      employeeId: employee.id,
+      employeeName: employee.name,
+      email: employee.email,
+      hasPasswordSet: !!employee.password,
+      organizationId: employee.organizationId,
+      userId: employee.userId,
+      status: employee.status
+    };
+  }
 };
 
 // src/module/employee/validators/employee.validator.ts
@@ -12969,6 +13109,12 @@ var saveEmployeeExitSchema = z6.object({
   status: z6.string().optional().default("PENDING_CLEARANCE"),
   settledDate: optionalDateSchema,
   netPayable: z6.number().optional().nullable()
+});
+var resetEmployeeCredentialsSchema = z6.object({
+  newEmail: z6.string().email("Invalid email format").optional().nullable(),
+  newPassword: z6.string().min(6, "Password must be at least 6 characters").optional().nullable(),
+  email: z6.string().email("Invalid email format").optional().nullable(),
+  password: z6.string().min(6, "Password must be at least 6 characters").optional().nullable()
 });
 
 // src/module/employee/controller/employee.controller.ts
@@ -13213,6 +13359,36 @@ var saveEmployeeExit = asyncHandler(async (req, res, next) => {
     200 /* OK */
   );
 });
+var resetEmployeeCredentials = asyncHandler(async (req, res, next) => {
+  const id = req.params.id;
+  if (!id) {
+    return next(new ErrorResponse("Employee ID is required", 400 /* Bad_Request */));
+  }
+  const parsed = resetEmployeeCredentialsSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return next(parsed.error);
+  }
+  const result = await EmployeeService.resetEmployeeCredentials(id, parsed.data, req.user);
+  return SuccessResponse(
+    res,
+    "Employee login credentials reset successfully",
+    result,
+    200 /* OK */
+  );
+});
+var getEmployeeCredentials = asyncHandler(async (req, res, next) => {
+  const id = req.params.id;
+  if (!id) {
+    return next(new ErrorResponse("Employee ID is required", 400 /* Bad_Request */));
+  }
+  const result = await EmployeeService.getEmployeeCredentials(id, req.user);
+  return SuccessResponse(
+    res,
+    "Employee credentials retrieved successfully",
+    result,
+    200 /* OK */
+  );
+});
 
 // src/module/employee/routes/employee.routes.ts
 var router7 = Router7();
@@ -13222,6 +13398,8 @@ router7.get("/:id", hasPermission("VIEW_EMPLOYEE_DIRECTORY", "VIEW_EMPLOYEE_MAST
 router7.post("/", hasPermission("CREATE_EMPLOYEES"), createEmployee);
 router7.put("/:id", hasPermission("UPDATE_EMPLOYEE_MASTER", "UPDATE_EMPLOYEES"), updateEmployee);
 router7.delete("/:id", hasPermission("DELETE_EMPLOYEES"), deleteEmployee);
+router7.get("/:id/credentials", getEmployeeCredentials);
+router7.post("/:id/reset-credentials", hasPermission("UPDATE_EMPLOYEES", "UPDATE_EMPLOYEE_MASTER", "MANAGE_EMPLOYEES"), resetEmployeeCredentials);
 router7.get("/:id/salary", getEmployeeSalary);
 router7.put("/:id/salary", hasPermission("UPDATE_SALARY_STRUCTURE", "UPDATE_PAYROLL"), updateEmployeeSalary);
 router7.get("/:id/personal", getEmployeePersonal);

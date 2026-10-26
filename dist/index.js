@@ -12844,14 +12844,24 @@ var EmployeeService = class {
             data: { userId: userAccount.id }
           });
           if (employee.organizationId) {
-            await prisma.organizationMembership.create({
-              data: {
+            await prisma.membership.upsert({
+              where: {
+                userId_organizationId: {
+                  userId: userAccount.id,
+                  organizationId: employee.organizationId
+                }
+              },
+              update: {
+                status: "ACTIVE",
+                ...defaultRole?.id ? { roleId: defaultRole.id } : {}
+              },
+              create: {
                 userId: userAccount.id,
                 organizationId: employee.organizationId,
                 roleId: defaultRole?.id || null,
                 status: "ACTIVE"
               }
-            }).catch((err) => console.warn("[Employee Reset] Membership create error:", err.message));
+            }).catch((err) => console.warn("[Employee Reset] Membership sync error:", err.message));
           }
         }
       }
@@ -13399,7 +13409,7 @@ router7.post("/", hasPermission("CREATE_EMPLOYEES"), createEmployee);
 router7.put("/:id", hasPermission("UPDATE_EMPLOYEE_MASTER", "UPDATE_EMPLOYEES"), updateEmployee);
 router7.delete("/:id", hasPermission("DELETE_EMPLOYEES"), deleteEmployee);
 router7.get("/:id/credentials", getEmployeeCredentials);
-router7.post("/:id/reset-credentials", hasPermission("UPDATE_EMPLOYEES", "UPDATE_EMPLOYEE_MASTER", "MANAGE_EMPLOYEES"), resetEmployeeCredentials);
+router7.post("/:id/reset-credentials", hasPermission("UPDATE_EMPLOYEES", "UPDATE_EMPLOYEE_MASTER"), resetEmployeeCredentials);
 router7.get("/:id/salary", getEmployeeSalary);
 router7.put("/:id/salary", hasPermission("UPDATE_SALARY_STRUCTURE", "UPDATE_PAYROLL"), updateEmployeeSalary);
 router7.get("/:id/personal", getEmployeePersonal);

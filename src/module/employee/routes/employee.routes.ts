@@ -33,7 +33,7 @@ router.delete("/:id", hasPermission("DELETE_EMPLOYEES"), deleteEmployee);
 
 // Credentials Management (Org Admin or HR can reset employee credentials)
 router.get("/:id/credentials", getEmployeeCredentials);
-router.post("/:id/reset-credentials", hasPermission("UPDATE_EMPLOYEES", "UPDATE_EMPLOYEE_MASTER", "MANAGE_EMPLOYEES"), resetEmployeeCredentials);
+router.post("/:id/reset-credentials", hasPermission("UPDATE_EMPLOYEES", "UPDATE_EMPLOYEE_MASTER"), resetEmployeeCredentials);
 
 // Salary Details routes
 router.get("/:id/salary", getEmployeeSalary);

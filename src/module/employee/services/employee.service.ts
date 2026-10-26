@@ -512,7 +512,7 @@ export class EmployeeService {
           ...(emailToSet ? { email: finalEmail } : {}),
           password: hashedPassword,
         },
-      }).catch((err) => {
+      }).catch((err: any) => {
         console.warn("[Employee Reset] Could not update linked user:", err.message);
         return null;
       });
@@ -552,7 +552,7 @@ export class EmployeeService {
             password: hashedPassword,
             roleId: defaultRole?.id || null,
           },
-        }).catch((err) => {
+        }).catch((err: any) => {
           console.warn("[Employee Reset] Could not auto-create user for employee:", err.message);
           return null;
         });
@@ -564,14 +564,24 @@ export class EmployeeService {
           });
 
           if (employee.organizationId) {
-            await prisma.organizationMembership.create({
-              data: {
+            await prisma.membership.upsert({
+              where: {
+                userId_organizationId: {
+                  userId: userAccount.id,
+                  organizationId: employee.organizationId,
+                },
+              },
+              update: {
+                status: "ACTIVE",
+                ...(defaultRole?.id ? { roleId: defaultRole.id } : {}),
+              },
+              create: {
                 userId: userAccount.id,
                 organizationId: employee.organizationId,
                 roleId: defaultRole?.id || null,
                 status: "ACTIVE",
               },
-            }).catch((err) => console.warn("[Employee Reset] Membership create error:", err.message));
+            }).catch((err: any) => console.warn("[Employee Reset] Membership sync error:", err.message));
           }
         }
       }

@@ -138,10 +138,16 @@ export class EmployeeService {
         // Resolve role: Use requested roleId (created by organization), or fallback to organization's EMPLOYEE role
         let assignedRoleId: string | null = null;
         if (requestedRoleId) {
-          const matchedRole = await prisma.role.findUnique({
-            where: { id: requestedRoleId },
+          const matchedRole = await prisma.role.findFirst({
+            where: {
+              OR: [
+                { id: requestedRoleId },
+                { name: { equals: requestedRoleId, mode: "insensitive" } },
+              ],
+              ...(effectiveOrgId ? { OR: [{ organizationId: effectiveOrgId }, { organizationId: null }] } : {}),
+            },
           });
-          if (matchedRole && (!matchedRole.organizationId || matchedRole.organizationId === effectiveOrgId)) {
+          if (matchedRole) {
             assignedRoleId = matchedRole.id;
           }
         }
@@ -406,6 +412,16 @@ export class EmployeeService {
             data: { password: hashedPassword }
           }).catch(err => console.warn("[Employee Service] Failed to sync user password on update:", err.message));
         }
+      }
+    }
+
+    if (data.roleId) {
+      const targetUserId = data.userId || employee.userId;
+      if (targetUserId) {
+        await prisma.user.update({
+          where: { id: targetUserId },
+          data: { roleId: data.roleId }
+        }).catch(err => console.warn("[Employee Service] Failed to sync user role on update:", err.message));
       }
     }
 

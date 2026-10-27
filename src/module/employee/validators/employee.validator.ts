@@ -31,6 +31,7 @@ export const createEmployeeSchema = z
     location: z.string().optional().nullable(),
     address: z.string().optional().nullable(),
     designation: z.string().optional().nullable(),
+    role: z.string().optional().nullable(),
     
     // Relations
     userId: z.string().optional().nullable(),
@@ -91,9 +92,10 @@ export const createEmployeeSchema = z
     const basic = data.basic !== undefined && data.basic !== null ? data.basic : data.salary;
     const netSalary = data.netSalary !== undefined && data.netSalary !== null ? data.netSalary : basic;
     const dob = data.dob || data.dateOfBirth;
+    const designation = data.designation !== undefined ? data.designation : data.role;
 
     // Destructure to remove incoming transient fields
-    const { employeeId, firstName, lastName, address, salary, dateOfBirth, ...rest } = data;
+    const { employeeId, firstName, lastName, address, salary, dateOfBirth, role, ...rest } = data;
 
     return {
       ...rest,
@@ -103,6 +105,7 @@ export const createEmployeeSchema = z
       basic,
       netSalary,
       dob,
+      ...(designation !== undefined ? { designation } : {}),
     };
   });
 

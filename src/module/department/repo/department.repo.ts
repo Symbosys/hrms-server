@@ -4,7 +4,7 @@ export class DepartmentRepository {
   static async create(data: {
     name: string;
     code: string;
-    description?: string;
+    description?: string | null;
     managerId?: string | null;
     parentId?: string | null;
     organizationId?: string | null;
@@ -65,7 +65,10 @@ export class DepartmentRepository {
   static async findAll(organizationId?: string) {
     const where: any = {};
     if (organizationId) {
-      where.organizationId = organizationId;
+      where.OR = [
+        { organizationId },
+        { organizationId: null }
+      ];
     }
     return prisma.department.findMany({
       where,
@@ -82,7 +85,7 @@ export class DepartmentRepository {
     data: {
       name?: string;
       code?: string;
-      description?: string;
+      description?: string | null;
       managerId?: string | null;
       parentId?: string | null;
     }

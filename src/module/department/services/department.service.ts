@@ -5,22 +5,30 @@ import { statusCode } from "../../../types/types.ts";
 export class DepartmentService {
   static async createDepartment(data: {
     name: string;
-    code: string;
-    description?: string;
+    code?: string;
+    description?: string | null;
     managerId?: string | null;
     parentId?: string | null;
   }, organizationId?: string) {
     const cleanName = data.name.trim();
-    const cleanCode = data.code.trim().toUpperCase();
+    let cleanCode = data.code?.trim().toUpperCase();
+    if (!cleanCode) {
+      const words = cleanName.split(/\s+/);
+      if (words.length > 1) {
+        cleanCode = words.map(w => w[0]).join('').toUpperCase().slice(0, 5);
+      } else {
+        cleanCode = cleanName.slice(0, 3).toUpperCase();
+      }
+    }
 
     const existingName = await DepartmentRepository.findByName(cleanName, organizationId);
     if (existingName) {
-      throw new ErrorResponse(`Department with name "${cleanName}" already exists. Please choose a different name.`, statusCode.Conflict);
+      throw new ErrorResponse(`Department with name "${cleanName}" already exists in this organization.`, statusCode.Conflict);
     }
 
     const existingCode = await DepartmentRepository.findByCode(cleanCode, organizationId);
     if (existingCode) {
-      throw new ErrorResponse(`Department code "${cleanCode}" already exists. Please choose a different code.`, statusCode.Conflict);
+      throw new ErrorResponse(`Department code "${cleanCode}" already exists in this organization.`, statusCode.Conflict);
     }
 
     let resolvedManagerId: string | null = null;
@@ -41,6 +49,8 @@ export class DepartmentService {
 
     return DepartmentRepository.create({
       ...data,
+      name: cleanName,
+      code: cleanCode,
       managerId: resolvedManagerId,
       organizationId: organizationId || null,
     });

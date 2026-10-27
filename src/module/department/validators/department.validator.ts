@@ -6,11 +6,12 @@ export const createDepartmentSchema = z.object({
     .min(2, "Department name must be at least 2 characters")
     .max(100, "Department name must not exceed 100 characters"),
   code: z
-    .string({ message: "Department code is required" })
+    .string()
     .min(2, "Department code must be at least 2 characters")
     .max(20, "Department code must not exceed 20 characters")
-    .toUpperCase(),
-  description: z.string().optional(),
+    .toUpperCase()
+    .optional(),
+  description: z.string().optional().nullable(),
   managerId: z.string().nullable().optional(),
   parentId: z.string().nullable().optional(),
 });

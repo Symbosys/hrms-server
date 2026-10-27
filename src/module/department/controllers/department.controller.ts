@@ -15,7 +15,12 @@ export const createDepartment = asyncHandler(async (req: AuthenticatedRequest, r
     return next(parsed.error);
   }
 
-  const department = await DepartmentService.createDepartment(parsed.data, req.user?.organizationId);
+  const organizationId =
+    (req.headers["x-organization-id"] as string) ||
+    (req.query.organizationId as string) ||
+    req.user?.organizationId;
+
+  const department = await DepartmentService.createDepartment(parsed.data, organizationId);
 
   return SuccessResponse(
     res,
@@ -26,7 +31,12 @@ export const createDepartment = asyncHandler(async (req: AuthenticatedRequest, r
 });
 
 export const getDepartments = asyncHandler(async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-  const departments = await DepartmentService.getDepartments(req.user?.organizationId);
+  const organizationId =
+    (req.headers["x-organization-id"] as string) ||
+    (req.query.organizationId as string) ||
+    req.user?.organizationId;
+
+  const departments = await DepartmentService.getDepartments(organizationId);
 
   return SuccessResponse(
     res,
@@ -55,7 +65,12 @@ export const updateDepartment = asyncHandler(async (req: AuthenticatedRequest, r
     return next(parsed.error);
   }
 
-  const updatedDepartment = await DepartmentService.updateDepartment(id, parsed.data, req.user?.organizationId);
+  const organizationId =
+    (req.headers["x-organization-id"] as string) ||
+    (req.query.organizationId as string) ||
+    req.user?.organizationId;
+
+  const updatedDepartment = await DepartmentService.updateDepartment(id, parsed.data, organizationId);
 
   return SuccessResponse(
     res,

@@ -312,6 +312,10 @@ export class EmployeeService {
     // Resolve effective organizationId for lookup
     const effectiveOrgId = employee.organizationId || null;
 
+    if (data.departmentId === "") {
+      data.departmentId = null;
+    }
+
     // 3. If department string provided without departmentId, resolve it
     if (!data.departmentId && data.department) {
       const cleanDept = String(data.department).trim();
@@ -334,8 +338,22 @@ export class EmployeeService {
     if (data.departmentId && data.departmentId !== employee.departmentId) {
       const dept = await EmployeeRepository.findDepartmentById(data.departmentId);
       if (!dept) {
-        console.warn(`[Employee Service] Department with ID ${data.departmentId} not found. Setting departmentId to null.`);
-        data.departmentId = null;
+        // Maybe departmentId passed was actually a department name or code?
+        const deptByName = await prisma.department.findFirst({
+          where: {
+            OR: [
+              { name: { equals: data.departmentId, mode: "insensitive" } },
+              { code: { equals: data.departmentId.toUpperCase() } },
+            ],
+            ...(effectiveOrgId ? { organizationId: effectiveOrgId } : {}),
+          },
+        });
+        if (deptByName) {
+          data.departmentId = deptByName.id;
+        } else {
+          console.warn(`[Employee Service] Department with ID ${data.departmentId} not found. Setting departmentId to null.`);
+          data.departmentId = null;
+        }
       }
     }
 
@@ -391,7 +409,7 @@ export class EmployeeService {
       }
     }
 
-    const { department: _rawDept, ...updatePayload } = data;
+    const { department: _rawDept, role: _rawRole, ...updatePayload } = data;
     return EmployeeRepository.update(id, updatePayload);
   }
 

@@ -120,6 +120,7 @@ export const updateEmployeeSchema = z
     location: z.string().optional().nullable(),
     address: z.string().optional().nullable(),
     designation: z.string().optional().nullable(),
+    role: z.string().optional().nullable(),
     
     // Relations
     userId: z.string().optional().nullable(),
@@ -168,16 +169,18 @@ export const updateEmployeeSchema = z
       name = [data.firstName, data.lastName].filter(Boolean).join(" ");
     }
     const location = data.location || data.address;
+    const designation = data.designation !== undefined ? data.designation : data.role;
     const basic = data.basic !== undefined && data.basic !== null ? data.basic : data.salary;
     const netSalary = data.netSalary !== undefined && data.netSalary !== null ? data.netSalary : basic;
     const dob = data.dob || data.dateOfBirth;
 
-    const { firstName, lastName, address, salary, dateOfBirth, ...rest } = data;
+    const { firstName, lastName, address, salary, dateOfBirth, role, ...rest } = data;
 
     return {
       ...rest,
       ...(name ? { name } : {}),
       ...(location ? { location } : {}),
+      ...(designation !== undefined ? { designation } : {}),
       ...(basic !== undefined ? { basic } : {}),
       ...(netSalary !== undefined ? { netSalary } : {}),
       ...(dob ? { dob } : {}),

@@ -49,38 +49,32 @@ export class OrganizationRepository {
     const plainPassword = password || "Admin@123";
     const hashedPassword = hashPassword(plainPassword);
 
-    // 1. Fetch or create SUPER_ADMIN role with all permissions connected
-    const allPermissions = await prisma.permission.findMany({ select: { id: true } });
-
-    let superAdminRole = await prisma.role.findFirst({
-      where: { name: "SUPER_ADMIN" }
+    // 1. Create the organization first
+    const organization = await prisma.organization.create({
+      data: {
+        ...orgData,
+        address: address ? { create: address } : undefined,
+      } as any,
+      include: { address: true },
     });
 
-    if (!superAdminRole) {
-      superAdminRole = await prisma.role.create({
-        data: {
-          id: "role_super_admin",
-          name: "SUPER_ADMIN",
-          description: "Full system control with all permissions",
-          isSystem: true,
-          permissions: {
-            connect: allPermissions.map((p) => ({ id: p.id })),
-          },
-        },
-      });
-    } else {
-      // Ensure all permissions are connected to SUPER_ADMIN role
-      await prisma.role.update({
-        where: { id: superAdminRole.id },
-        data: {
-          permissions: {
-            set: allPermissions.map((p) => ({ id: p.id })),
-          },
-        },
-      });
-    }
+    // 2. Fetch all permissions to connect to this org's dedicated SUPER_ADMIN role
+    const allPermissions = await prisma.permission.findMany({ select: { id: true } });
 
-    // 2. Create a separate dedicated Admin User for this organization
+    // 3. Create dedicated org-scoped SUPER_ADMIN role
+    const superAdminRole = await prisma.role.create({
+      data: {
+        name: "SUPER_ADMIN",
+        description: `Super Admin role for ${orgData.name} — full access to all modules`,
+        isSystem: true,
+        organizationId: organization.id,
+        permissions: {
+          connect: allPermissions.map((p) => ({ id: p.id })),
+        },
+      },
+    });
+
+    // 4. Create a separate dedicated Admin User for this organization linked to the org-scoped role
     const user = await prisma.user.create({
       data: {
         name: `Admin - ${orgData.name}`,
@@ -90,18 +84,9 @@ export class OrganizationRepository {
         roleId: superAdminRole.id,
       }
     });
-    console.log(`[Onboarding] Created dedicated admin user ${user.id} with SUPER_ADMIN permissions for organization ${orgData.name}`);
+    console.log(`[Onboarding] Created dedicated admin user ${user.id} with org-scoped SUPER_ADMIN role for organization ${orgData.name}`);
 
-    // 3. Create the organization (without userId, linked via membership table instead)
-    const organization = await prisma.organization.create({
-      data: {
-        ...orgData,
-        address: address ? { create: address } : undefined,
-      } as any,
-      include: { address: true },
-    });
-
-    // 4. Create a membership record for this user in the organization with SUPER_ADMIN role
+    // 5. Create a membership record for this user in the organization with the org-scoped role
     await prisma.membership.create({
       data: {
         userId: user.id,
@@ -110,7 +95,6 @@ export class OrganizationRepository {
         roleId: superAdminRole.id,
       } as any
     });
-
 
     return organization;
   }

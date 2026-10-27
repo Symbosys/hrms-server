@@ -9294,7 +9294,8 @@ async function syncDatabase() {
       END $$;
     `);
     const rolesToSeed = [
-      { id: "role_super_admin", name: "SUPER_ADMIN", description: "System Administrator with full access" }
+      { id: "role_super_admin", name: "SUPER_ADMIN", description: "System Administrator with full access" },
+      { id: "role_employee", name: "EMPLOYEE", description: "Standard Employee with self-service access" }
     ];
     for (const r of rolesToSeed) {
       const existingRole = await prisma.role.findFirst({
@@ -9381,11 +9382,14 @@ async function syncDatabase() {
         where: { roleId: null }
       });
       if (usersWithoutRole.length > 0) {
-        await prisma.user.updateMany({
-          where: { roleId: null },
-          data: { roleId: superAdminRoleObj.id }
-        });
-        console.log(`[DB Sync] Auto-assigned ${usersWithoutRole.length} user(s) without roles to SUPER_ADMIN role.`);
+        const defaultEmpRole = await prisma.role.findFirst({ where: { name: "EMPLOYEE" } });
+        if (defaultEmpRole) {
+          await prisma.user.updateMany({
+            where: { roleId: null },
+            data: { roleId: defaultEmpRole.id }
+          });
+          console.log(`[DB Sync] Auto-assigned ${usersWithoutRole.length} user(s) without roles to EMPLOYEE role.`);
+        }
       }
       let infoUser = await prisma.user.findFirst({
         where: { OR: [{ email: "info@symbosys.com" }, { phone: "6200065370" }] }
@@ -12247,6 +12251,9 @@ var EmployeeRepository = class {
     if (filters.organizationId) {
       whereClause.organizationId = filters.organizationId;
     }
+    if (filters.userId) {
+      whereClause.userId = filters.userId;
+    }
     if (filters.departmentId) {
       whereClause.departmentId = filters.departmentId;
     }
@@ -12474,14 +12481,42 @@ var EmployeeService = class {
         throw new ErrorResponse("An employee cannot be their own manager", 400 /* Bad_Request */);
       }
     }
+    const effectiveOrgId = organizationId || (await prisma.organization.findFirst())?.id || null;
+    const { roleId: requestedRoleId, ...employeeFields } = data;
     const rawPassword = data.password || "Password@123";
     const hashedPassword = crypto4.createHash("sha256").update(rawPassword).digest("hex");
-    data.password = hashedPassword;
+    employeeFields.password = hashedPassword;
     if (data.email) {
       try {
-        const empRole = await prisma.role.findFirst({
-          where: { name: "EMPLOYEE" }
-        });
+        let assignedRoleId = null;
+        if (requestedRoleId) {
+          const matchedRole = await prisma.role.findUnique({
+            where: { id: requestedRoleId }
+          });
+          if (matchedRole) {
+            assignedRoleId = matchedRole.id;
+          }
+        }
+        if (!assignedRoleId) {
+          let empRole = await prisma.role.findFirst({
+            where: {
+              name: "EMPLOYEE",
+              ...effectiveOrgId ? { OR: [{ organizationId: effectiveOrgId }, { organizationId: null }] } : {}
+            },
+            orderBy: { organizationId: "desc" }
+          });
+          if (!empRole) {
+            empRole = await prisma.role.create({
+              data: {
+                name: "EMPLOYEE",
+                description: "Standard employee role",
+                isSystem: true,
+                organizationId: effectiveOrgId || null
+              }
+            });
+          }
+          assignedRoleId = empRole.id;
+        }
         let targetUser = null;
         if (data.userId) {
           const userObj = await prisma.user.findUnique({ where: { id: data.userId } });
@@ -12517,7 +12552,7 @@ var EmployeeService = class {
               email: data.email,
               phone: userPhone,
               password: hashedPassword,
-              roleId: empRole?.id || null
+              roleId: assignedRoleId
             }
           });
         } else {
@@ -12526,34 +12561,38 @@ var EmployeeService = class {
             data: {
               password: hashedPassword,
               name: targetUser.name || data.name,
-              roleId: targetUser.roleId || empRole?.id || void 0
+              roleId: requestedRoleId ? assignedRoleId : targetUser.roleId || assignedRoleId
             }
           });
         }
         data.userId = targetUser.id;
-        const effectiveOrgId2 = organizationId || (await prisma.organization.findFirst())?.id;
-        if (effectiveOrgId2) {
-          const existingMembership = await prisma.membership.findFirst({
-            where: { userId: targetUser.id, organizationId: effectiveOrgId2 }
-          });
-          if (!existingMembership) {
-            await prisma.membership.create({
-              data: {
+        employeeFields.userId = targetUser.id;
+        if (effectiveOrgId) {
+          await prisma.membership.upsert({
+            where: {
+              userId_organizationId: {
                 userId: targetUser.id,
-                organizationId: effectiveOrgId2,
-                status: "ACTIVE",
-                roleId: empRole?.id || null
+                organizationId: effectiveOrgId
               }
-            });
-          }
+            },
+            update: {
+              status: "ACTIVE",
+              ...assignedRoleId ? { roleId: assignedRoleId } : {}
+            },
+            create: {
+              userId: targetUser.id,
+              organizationId: effectiveOrgId,
+              status: "ACTIVE",
+              roleId: assignedRoleId
+            }
+          });
         }
       } catch (userErr) {
         console.warn("[Employee Service] Could not sync User table/membership during employee creation:", userErr.message);
       }
     }
-    const effectiveOrgId = organizationId || (await prisma.organization.findFirst())?.id || null;
     const createData = {
-      ...data,
+      ...employeeFields,
       id: employeeId,
       organizationId: effectiveOrgId
     };
@@ -12923,6 +12962,7 @@ var createEmployeeSchema = z6.object({
   designation: z6.string().optional().nullable(),
   // Relations
   userId: z6.string().optional().nullable(),
+  roleId: z6.string().optional().nullable(),
   departmentId: z6.string().optional().nullable(),
   managerId: z6.string().optional().nullable(),
   // Salary Details
@@ -13143,12 +13183,15 @@ var createEmployee = asyncHandler(async (req, res, next) => {
 });
 var getEmployees = asyncHandler(async (req, res, next) => {
   const { departmentId, managerId, status, search } = req.query;
+  const userRoleName = (req.user?.role?.name || "").toUpperCase();
+  const isPrivileged = !!(req.user?.isPlatformAdmin || ["SUPER_ADMIN", "HR_ADMIN", "ADMIN", "SUPER ADMIN", "HR ADMIN"].includes(userRoleName));
   const employees = await EmployeeService.getEmployees({
     organizationId: req.user?.organizationId,
     departmentId,
     managerId,
     status,
-    search
+    search,
+    userId: isPrivileged ? void 0 : req.user?.id
   });
   return SuccessResponse(
     res,

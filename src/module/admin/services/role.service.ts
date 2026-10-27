@@ -122,6 +122,10 @@ export class RoleService {
         resolvedRole = await RoleRepository.findRoleByName(roleId, organizationId);
       }
       if (resolvedRole) {
+        // Multi-tenant check: ensure role belongs to the organization OR is a global system default role
+        if (resolvedRole.organizationId && resolvedRole.organizationId !== organizationId) {
+          throw new ErrorResponse("Role does not belong to your organization", statusCode.Forbidden);
+        }
         targetRoleId = resolvedRole.id;
       } else {
         throw new ErrorResponse(`Role '${roleId}' not found in your organization context.`, statusCode.Not_Found);

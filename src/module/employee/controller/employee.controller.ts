@@ -33,12 +33,16 @@ export const createEmployee = asyncHandler(async (req: AuthenticatedRequest, res
 export const getEmployees = asyncHandler(async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   const { departmentId, managerId, status, search } = req.query;
 
+  const userRoleName = (req.user?.role?.name || "").toUpperCase();
+  const isPrivileged = !!(req.user?.isPlatformAdmin || ["SUPER_ADMIN", "HR_ADMIN", "ADMIN", "SUPER ADMIN", "HR ADMIN"].includes(userRoleName));
+
   const employees = await EmployeeService.getEmployees({
     organizationId: req.user?.organizationId,
     departmentId: departmentId as string,
     managerId: managerId as string,
     status: status as any,
     search: search as string,
+    userId: isPrivileged ? undefined : req.user?.id,
   });
 
   return SuccessResponse(

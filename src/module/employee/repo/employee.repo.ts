@@ -53,11 +53,16 @@ export class EmployeeRepository {
     managerId?: string;
     status?: any;
     search?: string;
+    userId?: string;
   }) {
     const whereClause: any = {};
 
     if (filters.organizationId) {
       whereClause.organizationId = filters.organizationId;
+    }
+
+    if (filters.userId) {
+      whereClause.userId = filters.userId;
     }
 
     if (filters.departmentId) {

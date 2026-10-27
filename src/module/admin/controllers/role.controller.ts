@@ -15,7 +15,10 @@ import {
  * Helper to extract organizationId from the authenticated request
  */
 const getOrganizationId = (req: AuthenticatedRequest): string => {
-  const orgId = req.user?.organizationId;
+  const orgId =
+    req.user?.organizationId ||
+    (req.headers["x-organization-id"] as string) ||
+    (req.query.organizationId as string);
   if (!orgId) {
     throw new ErrorResponse("Organization context not found. Please log in again.", statusCode.Bad_Request);
   }

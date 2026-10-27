@@ -34,6 +34,7 @@ export const createEmployeeSchema = z
     
     // Relations
     userId: z.string().optional().nullable(),
+    roleId: z.string().optional().nullable(),
     departmentId: z.string().optional().nullable(),
     managerId: z.string().optional().nullable(),
 

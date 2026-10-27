@@ -104,18 +104,50 @@ export class EmployeeService {
       }
     }
 
+    // Resolve final organizationId
+    const effectiveOrgId = organizationId || (await prisma.organization.findFirst())?.id || null;
+    const { roleId: requestedRoleId, ...employeeFields } = data;
+
     // Handle password hashing consistently (once)
     const rawPassword = data.password || "Password@123";
     const hashedPassword = crypto.createHash("sha256").update(rawPassword).digest("hex");
-    data.password = hashedPassword;
+    employeeFields.password = hashedPassword;
 
     // Sync or create associated User account for login authentication & organization binding
     if (data.email) {
       try {
-        // Fetch default EMPLOYEE role if present
-        const empRole = await prisma.role.findFirst({
-          where: { name: "EMPLOYEE" }
-        });
+        // Resolve role: Use requested roleId (created by organization), or fallback to organization's EMPLOYEE role
+        let assignedRoleId: string | null = null;
+        if (requestedRoleId) {
+          const matchedRole = await prisma.role.findUnique({
+            where: { id: requestedRoleId },
+          });
+          if (matchedRole && (!matchedRole.organizationId || matchedRole.organizationId === effectiveOrgId)) {
+            assignedRoleId = matchedRole.id;
+          }
+        }
+
+        if (!assignedRoleId) {
+          let empRole = await prisma.role.findFirst({
+            where: {
+              name: "EMPLOYEE",
+              ...(effectiveOrgId ? { OR: [{ organizationId: effectiveOrgId }, { organizationId: null }] } : {}),
+            },
+            orderBy: { organizationId: "desc" },
+          });
+
+          if (!empRole) {
+            empRole = await prisma.role.create({
+              data: {
+                name: "EMPLOYEE",
+                description: "Standard employee role",
+                isSystem: true,
+                organizationId: effectiveOrgId || null,
+              },
+            });
+          }
+          assignedRoleId = empRole.id;
+        }
 
         let targetUser = null;
 
@@ -159,7 +191,7 @@ export class EmployeeService {
               email: data.email,
               phone: userPhone,
               password: hashedPassword,
-              roleId: empRole?.id || null,
+              roleId: assignedRoleId,
             }
           });
         } else {
@@ -168,41 +200,43 @@ export class EmployeeService {
             data: {
               password: hashedPassword,
               name: targetUser.name || data.name,
-              roleId: targetUser.roleId || empRole?.id || undefined,
+              roleId: requestedRoleId ? assignedRoleId : (targetUser.roleId || assignedRoleId),
             }
           });
         }
 
         data.userId = targetUser.id;
+        employeeFields.userId = targetUser.id;
 
         // Ensure user has active membership in the target organization or default organization
-        const effectiveOrgId = organizationId || (await prisma.organization.findFirst())?.id;
         if (effectiveOrgId) {
-          const existingMembership = await prisma.membership.findFirst({
-            where: { userId: targetUser.id, organizationId: effectiveOrgId }
-          });
-          if (!existingMembership) {
-            await prisma.membership.create({
-              data: {
+          await prisma.membership.upsert({
+            where: {
+              userId_organizationId: {
                 userId: targetUser.id,
                 organizationId: effectiveOrgId,
-                status: "ACTIVE",
-                roleId: empRole?.id || null,
-              }
-            });
-          }
+              },
+            },
+            update: {
+              status: "ACTIVE",
+              ...(assignedRoleId ? { roleId: assignedRoleId } : {}),
+            },
+            create: {
+              userId: targetUser.id,
+              organizationId: effectiveOrgId,
+              status: "ACTIVE",
+              roleId: assignedRoleId,
+            },
+          });
         }
       } catch (userErr: any) {
         console.warn("[Employee Service] Could not sync User table/membership during employee creation:", userErr.message);
       }
     }
 
-    // Resolve final organizationId
-    const effectiveOrgId = organizationId || (await prisma.organization.findFirst())?.id || null;
-
     // Create final employee data
     const createData = {
-      ...data,
+      ...employeeFields,
       id: employeeId,
       organizationId: effectiveOrgId,
     };
@@ -216,6 +250,7 @@ export class EmployeeService {
     managerId?: string;
     status?: any;
     search?: string;
+    userId?: string;
   }) {
     return EmployeeRepository.findAll(filters);
   }

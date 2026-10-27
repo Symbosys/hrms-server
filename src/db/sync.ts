@@ -1935,30 +1935,21 @@ export async function syncDatabase() {
         console.log("[DB Sync] Successfully promoted info@symbosys.com to SUPER_ADMIN.");
       }
 
-      // Ensure employee record is also created and linked for info@symbosys.com
-      let infoEmployee = await prisma.employee.findFirst({
-        where: { OR: [{ userId: infoUser.id }, { email: "info@symbosys.com" }] }
-      });
-      if (!infoEmployee) {
-        const empCount = await prisma.employee.count();
-        const empId = `EMP${String(empCount + 1).padStart(3, '0')}`;
-        await prisma.employee.create({
-          data: {
-            id: empId,
-            name: infoUser.name || "Symbosys Admin",
-            email: infoUser.email || "info@symbosys.com",
-            phone: infoUser.phone,
-            status: "ACTIVE",
-            joiningDate: new Date(),
-            userId: infoUser.id,
-          }
+      // Ensure Organization Admins are NOT in the employees table
+      // (Admins belong to users and memberships tables, not operational staff)
+      try {
+        await prisma.employee.deleteMany({
+          where: {
+            OR: [
+              { email: "info@symbosys.com" },
+              { id: "EMP001" },
+              { userId: infoUser.id },
+            ],
+          },
         });
-        console.log(`[DB Sync] Created and linked employee ${empId} for info@symbosys.com.`);
-      } else if (!infoEmployee.userId) {
-        await prisma.employee.update({
-          where: { id: infoEmployee.id },
-          data: { userId: infoUser.id }
-        });
+        console.log("[DB Sync] Verified: Organization Admin is not in employees table.");
+      } catch (cleanErr: any) {
+        console.warn("[DB Sync] Notice cleaning admin from employees:", cleanErr.message);
       }
 
 

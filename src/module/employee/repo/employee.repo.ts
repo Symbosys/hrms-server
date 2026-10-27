@@ -85,6 +85,12 @@ export class EmployeeRepository {
       ];
     }
 
+    // Exclude SUPER_ADMIN / Organization Admin accounts from Employee Directory
+    whereClause.NOT = [
+      { user: { role: { name: "SUPER_ADMIN" } } },
+      { email: "info@symbosys.com" },
+    ];
+
     return prisma.employee.findMany({
       where: whereClause,
       include: {

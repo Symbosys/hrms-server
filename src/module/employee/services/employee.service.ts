@@ -66,7 +66,27 @@ export class EmployeeService {
       }
     }
 
-    // 4. Validate department existence
+    // Resolve final organizationId
+    const effectiveOrgId = organizationId || (await prisma.organization.findFirst())?.id || null;
+
+    // 4. Resolve & Validate department existence
+    if (!data.departmentId && data.department) {
+      const cleanDept = String(data.department).trim();
+      const matchedDept = await prisma.department.findFirst({
+        where: {
+          OR: [
+            { id: cleanDept },
+            { name: { equals: cleanDept, mode: "insensitive" } },
+            { code: { equals: cleanDept.toUpperCase() } },
+          ],
+          ...(effectiveOrgId ? { organizationId: effectiveOrgId } : {}),
+        },
+      });
+      if (matchedDept) {
+        data.departmentId = matchedDept.id;
+      }
+    }
+
     if (data.departmentId) {
       const dept = await EmployeeRepository.findDepartmentById(data.departmentId);
       if (!dept) {
@@ -104,9 +124,8 @@ export class EmployeeService {
       }
     }
 
-    // Resolve final organizationId
-    const effectiveOrgId = organizationId || (await prisma.organization.findFirst())?.id || null;
-    const { roleId: requestedRoleId, ...employeeFields } = data;
+    const { roleId: requestedRoleId, department: _rawDept, ...employeeFields } = data;
+    employeeFields.departmentId = data.departmentId || null;
 
     // Handle password hashing consistently (once)
     const rawPassword = data.password || "Password@123";
@@ -290,7 +309,28 @@ export class EmployeeService {
       }
     }
 
-    // 3. If departmentId changes, validate existence
+    // Resolve effective organizationId for lookup
+    const effectiveOrgId = employee.organizationId || null;
+
+    // 3. If department string provided without departmentId, resolve it
+    if (!data.departmentId && data.department) {
+      const cleanDept = String(data.department).trim();
+      const matchedDept = await prisma.department.findFirst({
+        where: {
+          OR: [
+            { id: cleanDept },
+            { name: { equals: cleanDept, mode: "insensitive" } },
+            { code: { equals: cleanDept.toUpperCase() } },
+          ],
+          ...(effectiveOrgId ? { organizationId: effectiveOrgId } : {}),
+        },
+      });
+      if (matchedDept) {
+        data.departmentId = matchedDept.id;
+      }
+    }
+
+    // If departmentId changes, validate existence
     if (data.departmentId && data.departmentId !== employee.departmentId) {
       const dept = await EmployeeRepository.findDepartmentById(data.departmentId);
       if (!dept) {
@@ -351,7 +391,8 @@ export class EmployeeService {
       }
     }
 
-    return EmployeeRepository.update(id, data);
+    const { department: _rawDept, ...updatePayload } = data;
+    return EmployeeRepository.update(id, updatePayload);
   }
 
   static async deleteEmployee(id: string) {

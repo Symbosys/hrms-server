@@ -36,6 +36,7 @@ export const createEmployeeSchema = z
     userId: z.string().optional().nullable(),
     roleId: z.string().optional().nullable(),
     departmentId: z.string().optional().nullable(),
+    department: z.string().optional().nullable(),
     managerId: z.string().optional().nullable(),
 
     // Salary Details
@@ -123,6 +124,7 @@ export const updateEmployeeSchema = z
     // Relations
     userId: z.string().optional().nullable(),
     departmentId: z.string().optional().nullable(),
+    department: z.string().optional().nullable(),
     managerId: z.string().optional().nullable(),
 
     // Salary Details

@@ -160,6 +160,35 @@ export class AttendanceService {
       throw new ErrorResponse("Employee not found in your organization context", statusCode.Not_Found);
     }
 
+    // Shift & Week Off Validation
+    try {
+      const days = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
+      const dayIdx = new Date().getDay();
+      const todayDayKey: string = days[dayIdx] ?? "mon";
+      const roster = await prisma.shiftRoster.findFirst({
+        where: {
+          OR: [
+            { employeeId: employee.id },
+            ...(employee.userId ? [{ employeeId: employee.userId }] : []),
+          ],
+        },
+        orderBy: { updatedAt: "desc" },
+      });
+
+      if (roster) {
+        const todayShiftCode = String((roster as any)[todayDayKey] || "").trim().toUpperCase();
+        if (todayShiftCode === "OFF" || todayShiftCode === "WEEK OFF" || todayShiftCode === "WEEKOFF" || todayShiftCode === "WO") {
+          throw new ErrorResponse(
+            `Punch restricted: Today is scheduled as your Week Off in your assigned shift roster.`,
+            statusCode.Bad_Request
+          );
+        }
+      }
+    } catch (err: any) {
+      if (err instanceof ErrorResponse) throw err;
+      // otherwise proceed
+    }
+
     // Geofencing Check
     const fences = await this.getGeofences(organizationId);
     const activeFences = fences.filter(f => f.isActive);
@@ -391,8 +420,7 @@ export class AttendanceService {
   ) {
     const results = [];
     for (const item of rosters) {
-      let resolvedEmpId = item.employeeId;
-      const emp = await prisma.employee.findFirst({
+      let emp = await prisma.employee.findFirst({
         where: {
           OR: [
             { id: item.employeeId },
@@ -402,13 +430,27 @@ export class AttendanceService {
           ...(organizationId ? { organizationId } : {}),
         },
       });
-      if (emp) {
-        resolvedEmpId = emp.id;
+
+      if (!emp && organizationId) {
+        emp = await prisma.employee.findFirst({
+          where: {
+            OR: [
+              { id: item.employeeId },
+              { userId: item.employeeId },
+              { email: { equals: item.employeeId, mode: "insensitive" } },
+            ],
+          },
+        });
+      }
+
+      if (!emp) {
+        console.warn(`[Attendance Service] Employee with ID '${item.employeeId}' not found in DB. Skipping roster item.`);
+        continue;
       }
 
       const res = await AttendanceRepository.upsertRoster({
         ...item,
-        employeeId: resolvedEmpId,
+        employeeId: emp.id,
         week,
       });
       results.push(res);

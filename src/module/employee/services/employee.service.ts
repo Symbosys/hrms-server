@@ -152,26 +152,14 @@ export class EmployeeService {
           }
         }
 
-        if (!assignedRoleId) {
-          let empRole = await prisma.role.findFirst({
-            where: {
-              name: "EMPLOYEE",
-              ...(effectiveOrgId ? { OR: [{ organizationId: effectiveOrgId }, { organizationId: null }] } : {}),
-            },
-            orderBy: { organizationId: "desc" },
+        if (!assignedRoleId && effectiveOrgId) {
+          const existingRole = await prisma.role.findFirst({
+            where: { organizationId: effectiveOrgId },
+            orderBy: { createdAt: "asc" },
           });
-
-          if (!empRole) {
-            empRole = await prisma.role.create({
-              data: {
-                name: "EMPLOYEE",
-                description: "Standard employee role",
-                isSystem: true,
-                organizationId: effectiveOrgId || null,
-              },
-            });
+          if (existingRole) {
+            assignedRoleId = existingRole.id;
           }
-          assignedRoleId = empRole.id;
         }
 
         let targetUser = null;

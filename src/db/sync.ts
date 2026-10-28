@@ -1743,29 +1743,7 @@ export async function syncDatabase() {
       END $$;
     `);
 
-    // 7. Seed system-default roles if they don't exist
-    const rolesToSeed = [
-      { id: "role_super_admin", name: "SUPER_ADMIN", description: "System Administrator with full access" },
-      { id: "role_employee", name: "EMPLOYEE", description: "Standard Employee with self-service access" },
-    ];
-
-    for (const r of rolesToSeed) {
-      const existingRole = await prisma.role.findFirst({
-        where: { name: r.name },
-      });
-
-      if (!existingRole) {
-        await prisma.role.create({
-          data: {
-            id: r.id,
-            name: r.name,
-            description: r.description,
-            isSystem: true,
-          },
-        });
-        console.log(`[DB Sync] Seeded system default ${r.name} role.`);
-      }
-    }
+    // 7. Roles are custom created and managed per organization, not pre-seeded globally.
 
     // 7.5 Seed default leave types if table is empty
     const leaveTypesCount = await prisma.$queryRawUnsafe(`SELECT COUNT(*) as count FROM "leave_types"`);
@@ -1841,77 +1819,7 @@ export async function syncDatabase() {
     }
 
     if (superAdminRoleObj) {
-      const usersWithoutRole = await prisma.user.findMany({
-        where: { roleId: null },
-      });
-
-      if (usersWithoutRole.length > 0) {
-        const defaultEmpRole = await prisma.role.findFirst({ where: { name: "EMPLOYEE" } });
-        if (defaultEmpRole) {
-          await prisma.user.updateMany({
-            where: { roleId: null },
-            data: { roleId: defaultEmpRole.id },
-          });
-          console.log(`[DB Sync] Auto-assigned ${usersWithoutRole.length} user(s) without roles to EMPLOYEE role.`);
-        }
-      }
-
-      // Ensure each organization has its own dedicated org-scoped SUPER_ADMIN role
-      const allExistingOrgs = await prisma.organization.findMany();
-      for (const org of allExistingOrgs) {
-        let orgSuperAdmin = await prisma.role.findFirst({
-          where: {
-            name: "SUPER_ADMIN",
-            organizationId: org.id,
-          },
-        });
-
-        if (!orgSuperAdmin) {
-          orgSuperAdmin = await prisma.role.create({
-            data: {
-              name: "SUPER_ADMIN",
-              description: `Super Admin role for ${org.name} — full access to all modules`,
-              isSystem: true,
-              organizationId: org.id,
-              permissions: {
-                connect: allPermsList.map((p) => ({ id: p.id })),
-              },
-            },
-          });
-          console.log(`[DB Sync] Created dedicated org-scoped SUPER_ADMIN role for ${org.name}`);
-        } else {
-          await prisma.role.update({
-            where: { id: orgSuperAdmin.id },
-            data: {
-              permissions: {
-                set: allPermsList.map((p) => ({ id: p.id })),
-              },
-            },
-          });
-        }
-
-        // Migrate admin memberships to org-scoped SUPER_ADMIN role
-        const orgMemberships = await prisma.membership.findMany({
-          where: {
-            organizationId: org.id,
-            role: { name: "SUPER_ADMIN" },
-          },
-        });
-
-        for (const m of orgMemberships) {
-          if (m.roleId !== orgSuperAdmin.id) {
-            await prisma.membership.update({
-              where: { id: m.id },
-              data: { roleId: orgSuperAdmin.id },
-            });
-            await prisma.user.update({
-              where: { id: m.userId },
-              data: { roleId: orgSuperAdmin.id },
-            });
-            console.log(`[DB Sync] Updated admin user ${m.userId} in ${org.name} to org-scoped SUPER_ADMIN role.`);
-          }
-        }
-      }
+      // Roles are created custom by each organization via the Role & Permissions console.
 
       // Ensure info@symbosys.com user is seeded and promoted to SUPER_ADMIN with all permissions
       let infoUser = await prisma.user.findFirst({

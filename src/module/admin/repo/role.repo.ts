@@ -68,10 +68,7 @@ export class RoleRepository {
     return prisma.role.findFirst({
       where: {
         name: { equals: name, mode: "insensitive" },
-        OR: [
-          { organizationId },
-          { organizationId: null, isSystem: true },
-        ],
+        organizationId,
       },
     });
   }
@@ -114,10 +111,7 @@ export class RoleRepository {
   static async findAllRoles(organizationId: string) {
     const roles = await prisma.role.findMany({
       where: {
-        OR: [
-          { organizationId },
-          { organizationId: null, isSystem: true },
-        ],
+        organizationId,
       },
       include: {
         permissions: true,
@@ -125,15 +119,7 @@ export class RoleRepository {
       orderBy: { name: "asc" },
     });
 
-    // If an org-specific role exists with the same name as a global system role,
-    // the org-specific role takes precedence (filter out duplicate global default)
-    const orgRoleNames = new Set(
-      roles.filter((r) => r.organizationId === organizationId).map((r) => r.name.toUpperCase())
-    );
-
-    return roles.filter(
-      (r) => r.organizationId === organizationId || !orgRoleNames.has(r.name.toUpperCase())
-    );
+    return roles;
   }
 
   static async updateRole(

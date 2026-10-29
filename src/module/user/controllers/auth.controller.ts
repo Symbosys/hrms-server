@@ -61,26 +61,66 @@ const getActiveMembership = async (userId: string) => {
  * Helper to link or create employee record for the authenticated user based on their phone number
  */
 const linkOrCreateEmployeeForUser = async (user: any, organizationId?: string) => {
-  let employee = null;
+  // 1. Resolve user's role from user object, roleId, or active membership
+  let roleName = user.role?.name;
+  if (!roleName && user.roleId) {
+    try {
+      const roleObj = await prisma.role.findUnique({ where: { id: user.roleId } });
+      roleName = roleObj?.name;
+    } catch (_) {}
+  }
+  if (!roleName && user.id) {
+    try {
+      const membership = await prisma.membership.findFirst({
+        where: { userId: user.id, status: "ACTIVE" },
+        include: { role: true },
+      });
+      roleName = membership?.role?.name;
+    } catch (_) {}
+  }
+
+  const roleUpper = String(roleName || "").toUpperCase();
+  const isAdminOrOrg =
+    roleUpper === "SUPER_ADMIN" ||
+    roleUpper === "ORGANIZATION ADMIN" ||
+    roleUpper === "ADMIN" ||
+    roleUpper === "SUPER ADMIN" ||
+    roleUpper === "HR_ADMIN" ||
+    (user.name && user.name.startsWith("Admin -")) ||
+    user.email === "info@symbosys.com";
+
+  if (isAdminOrOrg) {
+    // Organization Admins belong to users and memberships tables, NOT operational employees table.
+    // Ensure any previously created fake employee record for this admin is cleaned up.
+    try {
+      await prisma.employee.deleteMany({
+        where: {
+          OR: [
+            { userId: user.id },
+            ...(user.email ? [{ email: { equals: user.email, mode: "insensitive" as const } }] : []),
+          ],
+        },
+      });
+    } catch (e: any) {
+      console.warn("[Auth] Notice cleaning admin from employee records:", e.message);
+    }
+    return null;
+  }
+
+  let employee: any = null;
   try {
     employee = await prisma.employee.findUnique({
-      where: { userId: user.id }
+      where: { userId: user.id },
     });
   } catch (err: any) {
     console.warn(`[Auth Controller] Error finding employee by userId:`, err.message || err);
   }
 
-
   if (!employee) {
-    // If the user is an Organization Admin (SUPER_ADMIN role), do NOT auto-create an Employee record.
-    if (user.role?.name === "SUPER_ADMIN" || user.roleId === "role_super_admin") {
-      return null;
-    }
-
     // 2. Try to find employee by matching email or phone number
-    if (!employee && user.email) {
+    if (user.email) {
       employee = await prisma.employee.findFirst({
-        where: { email: user.email }
+        where: { email: user.email },
       });
     }
 

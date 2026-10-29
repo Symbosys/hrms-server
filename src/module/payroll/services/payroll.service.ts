@@ -139,7 +139,13 @@ export class PayrollService {
 
   // Bulk salary revisions
   static async applyBulkRevision(incrementPercentage: number, departmentId?: string | null, organizationId?: string) {
-    const empWhere: any = { status: "ACTIVE" };
+    const empWhere: any = {
+      status: { notIn: ["TERMINATED", "RESIGNED"] },
+      NOT: [
+        { user: { role: { name: { in: ["SUPER_ADMIN", "Organization Admin", "ORGANIZATION ADMIN", "Super Admin", "ADMIN"] } } } },
+        { name: { startsWith: "Admin -" } },
+      ],
+    };
     if (departmentId) empWhere.departmentId = departmentId;
     if (organizationId) empWhere.organizationId = organizationId;
 

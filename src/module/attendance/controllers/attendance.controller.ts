@@ -187,3 +187,24 @@ export const deleteShiftTiming = asyncHandler(async (req: Request, res: Response
   );
 });
 
+export const getMusterRoll = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+  const organizationId = (req as any).user?.organizationId;
+  const requestingUser = (req as any).user;
+  const musterRoll = await AttendanceService.getMusterRoll(
+    {
+      month: req.query.month as string | undefined,
+      year: req.query.year as string | undefined,
+      employeeId: req.query.employeeId as string | undefined,
+    },
+    organizationId,
+    requestingUser
+  );
+  return SuccessResponse(
+    res,
+    "Muster roll retrieved successfully",
+    musterRoll,
+    statusCode.OK
+  );
+});
+
+

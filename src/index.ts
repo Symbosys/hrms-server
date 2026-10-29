@@ -5,6 +5,7 @@ import errorMiddleware from "./middlewares/error.middleware";
 import adminRoutes from "./module/admin/routes/role.routes.ts";
 import assetRoutes from "./module/asset/routes/asset.routes.ts";
 import attendanceRoutes from "./module/attendance/routes/attendance.routes.ts";
+import { AttendanceService } from "./module/attendance/services/attendance.service.ts";
 import dashboardRoutes from "./module/dashboard/routes/dashboard.routes.ts";
 import departmentRoutes from "./module/department/routes/department.routes.ts";
 import documentRoutes from "./module/document/routes/document.routes.ts";
@@ -88,10 +89,19 @@ app.use(errorMiddleware)
 syncDatabase().then(() => {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on port ${PORT} (0.0.0.0)`);
+    // Run auto punch-out on startup and every 15 minutes to guarantee midnight 12:00 AM auto-punchout
+    AttendanceService.autoPunchOutPendingUsers();
+    setInterval(() => {
+      AttendanceService.autoPunchOutPendingUsers();
+    }, 15 * 60 * 1000);
   });
 }).catch((err) => {
   console.error("Database sync failed, starting server anyway...", err);
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on port ${PORT} (0.0.0.0)`);
+    AttendanceService.autoPunchOutPendingUsers();
+    setInterval(() => {
+      AttendanceService.autoPunchOutPendingUsers();
+    }, 15 * 60 * 1000);
   });
 });

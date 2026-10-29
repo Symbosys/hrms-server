@@ -14,6 +14,7 @@ import {
   getShiftTimings,
   createShiftTiming,
   deleteShiftTiming,
+  getMusterRoll,
 } from "../controllers/attendance.controller.ts";
 
 const router = Router();
@@ -21,6 +22,7 @@ const router = Router();
 // Protect all routes
 router.use(protect);
 
+router.get("/muster-roll", hasPermission("VIEW_MUSTER_ROLL", "VIEW_ATTENDANCE"), getMusterRoll);
 router.get("/punches/:employeeId", hasPermission("VIEW_GPS_SELFIE_PUNCH", "VIEW_ATTENDANCE"), getPunches);
 router.post("/punches", hasPermission("CREATE_GPS_SELFIE_PUNCH", "CREATE_ATTENDANCE"), createPunch);
 router.get("/regularizations", hasPermission("VIEW_ATTENDANCE_REGULARIZATION", "VIEW_ATTENDANCE"), getRegularizations);

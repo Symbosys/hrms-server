@@ -1849,13 +1849,15 @@ export async function syncDatabase() {
         await prisma.employee.deleteMany({
           where: {
             OR: [
-              { email: "info@symbosys.com" },
-              { id: "EMP001" },
+              { email: { in: ["info@symbosys.com", "info@symbosys2.com", "info@technova.com"] } },
+              { id: { in: ["EMP001", "EMP003", "EMP004", "EMP005"] } },
+              { name: { startsWith: "Admin -" } },
+              { user: { role: { name: { in: ["SUPER_ADMIN", "Organization Admin", "ADMIN"] } } } },
               { userId: infoUser.id },
             ],
           },
         });
-        console.log("[DB Sync] Verified: Organization Admin is not in employees table.");
+        console.log("[DB Sync] Verified: Organization Admins cleaned from employees table.");
       } catch (cleanErr: any) {
         console.warn("[DB Sync] Notice cleaning admin from employees:", cleanErr.message);
       }

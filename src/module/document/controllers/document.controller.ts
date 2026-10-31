@@ -54,8 +54,13 @@ export const uploadAvatar = asyncHandler(async (req: any, res: Response, next: N
 
   const avatarUrl = result.secure_url || result.url;
 
-  // Persist avatar URL into Employee record if user is authenticated
-  if (req.user) {
+  // Only persist avatar URL into logged-in Employee record if explicitly requested (e.g. self-profile update from Navbar)
+  const shouldUpdateSelf =
+    req.query?.updateSelf === "true" ||
+    req.body?.updateSelf === "true" ||
+    req.body?.updateSelf === true;
+
+  if (shouldUpdateSelf && req.user) {
     try {
       const conditions: any[] = [];
       if (req.user.id) conditions.push({ userId: req.user.id });

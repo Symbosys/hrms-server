@@ -9293,26 +9293,6 @@ async function syncDatabase() {
 
       END $$;
     `);
-    const rolesToSeed = [
-      { id: "role_super_admin", name: "SUPER_ADMIN", description: "System Administrator with full access" },
-      { id: "role_employee", name: "EMPLOYEE", description: "Standard Employee with self-service access" }
-    ];
-    for (const r of rolesToSeed) {
-      const existingRole = await prisma.role.findFirst({
-        where: { name: r.name }
-      });
-      if (!existingRole) {
-        await prisma.role.create({
-          data: {
-            id: r.id,
-            name: r.name,
-            description: r.description,
-            isSystem: true
-          }
-        });
-        console.log(`[DB Sync] Seeded system default ${r.name} role.`);
-      }
-    }
     const leaveTypesCount = await prisma.$queryRawUnsafe(`SELECT COUNT(*) as count FROM "leave_types"`);
     const countVal = Number(leaveTypesCount[0]?.count || 0);
     if (countVal === 0) {
@@ -9378,19 +9358,6 @@ async function syncDatabase() {
       });
     }
     if (superAdminRoleObj) {
-      const usersWithoutRole = await prisma.user.findMany({
-        where: { roleId: null }
-      });
-      if (usersWithoutRole.length > 0) {
-        const defaultEmpRole = await prisma.role.findFirst({ where: { name: "EMPLOYEE" } });
-        if (defaultEmpRole) {
-          await prisma.user.updateMany({
-            where: { roleId: null },
-            data: { roleId: defaultEmpRole.id }
-          });
-          console.log(`[DB Sync] Auto-assigned ${usersWithoutRole.length} user(s) without roles to EMPLOYEE role.`);
-        }
-      }
       let infoUser = await prisma.user.findFirst({
         where: { OR: [{ email: "info@symbosys.com" }, { phone: "6200065370" }] }
       });
@@ -9411,29 +9378,21 @@ async function syncDatabase() {
         });
         console.log("[DB Sync] Successfully promoted info@symbosys.com to SUPER_ADMIN.");
       }
-      let infoEmployee = await prisma.employee.findFirst({
-        where: { OR: [{ userId: infoUser.id }, { email: "info@symbosys.com" }] }
-      });
-      if (!infoEmployee) {
-        const empCount = await prisma.employee.count();
-        const empId = `EMP${String(empCount + 1).padStart(3, "0")}`;
-        await prisma.employee.create({
-          data: {
-            id: empId,
-            name: infoUser.name || "Symbosys Admin",
-            email: infoUser.email || "info@symbosys.com",
-            phone: infoUser.phone,
-            status: "ACTIVE",
-            joiningDate: /* @__PURE__ */ new Date(),
-            userId: infoUser.id
+      try {
+        await prisma.employee.deleteMany({
+          where: {
+            OR: [
+              { email: { in: ["info@symbosys.com", "info@symbosys2.com", "info@technova.com"] } },
+              { id: { in: ["EMP001", "EMP003", "EMP004", "EMP005"] } },
+              { name: { startsWith: "Admin -" } },
+              { user: { role: { name: { in: ["SUPER_ADMIN", "Organization Admin", "ADMIN"] } } } },
+              { userId: infoUser.id }
+            ]
           }
         });
-        console.log(`[DB Sync] Created and linked employee ${empId} for info@symbosys.com.`);
-      } else if (!infoEmployee.userId) {
-        await prisma.employee.update({
-          where: { id: infoEmployee.id },
-          data: { userId: infoUser.id }
-        });
+        console.log("[DB Sync] Verified: Organization Admins cleaned from employees table.");
+      } catch (cleanErr) {
+        console.warn("[DB Sync] Notice cleaning admin from employees:", cleanErr.message);
       }
     }
     await seedPermissions();
@@ -9994,11 +9953,7 @@ var RoleRepository = class _RoleRepository {
     return prisma.role.findFirst({
       where: {
         name: { equals: name, mode: "insensitive" },
-        OR: [
-          { organizationId },
-          { organizationId: null },
-          { isSystem: true }
-        ]
+        organizationId
       }
     });
   }
@@ -10030,19 +9985,16 @@ var RoleRepository = class _RoleRepository {
     });
   }
   static async findAllRoles(organizationId) {
-    return prisma.role.findMany({
+    const roles = await prisma.role.findMany({
       where: {
-        OR: [
-          { organizationId },
-          { organizationId: null },
-          { isSystem: true }
-        ]
+        organizationId
       },
       include: {
         permissions: true
       },
       orderBy: { name: "asc" }
     });
+    return roles;
   }
   static async updateRole(id, data) {
     const { name, description, permissionIds } = data;
@@ -10215,6 +10167,9 @@ var RoleService = class {
         resolvedRole = await RoleRepository.findRoleByName(roleId, organizationId);
       }
       if (resolvedRole) {
+        if (resolvedRole.organizationId && resolvedRole.organizationId !== organizationId) {
+          throw new ErrorResponse("Role does not belong to your organization", 403 /* Forbidden */);
+        }
         targetRoleId = resolvedRole.id;
       } else {
         throw new ErrorResponse(`Role '${roleId}' not found in your organization context.`, 404 /* Not_Found */);
@@ -10323,7 +10278,7 @@ var assignRoleSchema = z.object({
 
 // src/module/admin/controllers/role.controller.ts
 var getOrganizationId = (req) => {
-  const orgId = req.user?.organizationId;
+  const orgId = req.user?.organizationId || req.headers["x-organization-id"] || req.query.organizationId;
   if (!orgId) {
     throw new ErrorResponse("Organization context not found. Please log in again.", 400 /* Bad_Request */);
   }
@@ -10848,8 +10803,23 @@ var formatPunchTime = (createdAt, timeStr) => {
     return `${day} ${month} ${punchDate.getFullYear()}, ${clockPart}`;
   }
 };
+function parseTimeToMinutes(timeStr) {
+  if (!timeStr) return 9 * 60 + 30;
+  const cleaned = timeStr.trim().toUpperCase();
+  const match = cleaned.match(/(\d{1,2}):(\d{2})(?:\s*(AM|PM))?/i);
+  if (!match) return 9 * 60 + 30;
+  let hours = parseInt(match[1] || "9", 10);
+  const minutes = parseInt(match[2] || "30", 10);
+  const meridiem = match[3];
+  if (meridiem) {
+    if (meridiem === "PM" && hours < 12) hours += 12;
+    if (meridiem === "AM" && hours === 12) hours = 0;
+  }
+  return hours * 60 + minutes;
+}
 var AttendanceService = class {
   static async getPunches(employeeId, organizationId, requestingUser) {
+    await this.autoPunchOutPendingUsers(organizationId);
     let userEmp = null;
     if (requestingUser) {
       const userConditions = [];
@@ -10948,6 +10918,31 @@ var AttendanceService = class {
     if (!employee) {
       throw new ErrorResponse("Employee not found in your organization context", 404 /* Not_Found */);
     }
+    try {
+      const days = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+      const dayIdx = (/* @__PURE__ */ new Date()).getDay();
+      const todayDayKey = days[dayIdx] ?? "mon";
+      const roster = await prisma.shiftRoster.findFirst({
+        where: {
+          OR: [
+            { employeeId: employee.id },
+            ...employee.userId ? [{ employeeId: employee.userId }] : []
+          ]
+        },
+        orderBy: { updatedAt: "desc" }
+      });
+      if (roster) {
+        const todayShiftCode = String(roster[todayDayKey] || "").trim().toUpperCase();
+        if (todayShiftCode === "OFF" || todayShiftCode === "WEEK OFF" || todayShiftCode === "WEEKOFF" || todayShiftCode === "WO") {
+          throw new ErrorResponse(
+            `Punch restricted: Today is scheduled as your Week Off in your assigned shift roster.`,
+            400 /* Bad_Request */
+          );
+        }
+      }
+    } catch (err) {
+      if (err instanceof ErrorResponse) throw err;
+    }
     const fences = await this.getGeofences(organizationId);
     const activeFences = fences.filter((f) => f.isActive);
     if (activeFences.length > 0) {
@@ -10985,6 +10980,77 @@ var AttendanceService = class {
       hours = hours % 12;
       hours = hours ? hours : 12;
       timeString = `Today, ${hours.toString().padStart(2, "0")}:${minutes} ${ampm}`;
+    }
+    const isPunchIn = data.type.trim().toLowerCase() === "in";
+    const isPunchOut = data.type.trim().toLowerCase() === "out";
+    if (isPunchIn) {
+      let shiftStartMins = 9 * 60 + 30;
+      try {
+        const days = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+        const istDate = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+        const todayDayKey = days[istDate.getDay()] ?? "mon";
+        const roster = await prisma.shiftRoster.findFirst({
+          where: {
+            OR: [
+              { employeeId: employee.id },
+              ...employee.userId ? [{ employeeId: employee.userId }] : []
+            ]
+          },
+          orderBy: { updatedAt: "desc" }
+        });
+        if (roster && roster[todayDayKey]) {
+          const shiftCode = String(roster[todayDayKey]).trim();
+          const sh = await prisma.shift.findFirst({
+            where: {
+              OR: [
+                { code: { equals: shiftCode, mode: "insensitive" } },
+                { name: { equals: shiftCode, mode: "insensitive" } }
+              ],
+              ...organizationId ? { organizationId } : {}
+            }
+          });
+          if (sh?.startTime) {
+            shiftStartMins = parseTimeToMinutes(sh.startTime);
+          }
+        }
+        const punchMinutes = istDate.getHours() * 60 + istDate.getMinutes();
+        const lateMinutes = punchMinutes - shiftStartMins;
+        if (lateMinutes > 15) {
+          data.method = `${data.method} (Late: ${lateMinutes}m - Half Day)`;
+        } else if (lateMinutes > 0) {
+          data.method = `${data.method} (Late: ${lateMinutes}m)`;
+        } else {
+          data.method = `${data.method} (On Time)`;
+        }
+      } catch (err) {
+        console.warn("[AttendanceService] Could not evaluate shift lateness:", err);
+      }
+    } else if (isPunchOut) {
+      try {
+        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+        const lastInPunch = await prisma.attendancePunch.findFirst({
+          where: {
+            employeeId: employee.id,
+            type: { in: ["In", "IN", "in"] },
+            createdAt: { gte: startOfToday }
+          },
+          orderBy: { createdAt: "desc" }
+        });
+        if (lastInPunch) {
+          const diffMs = now.getTime() - new Date(lastInPunch.createdAt).getTime();
+          const workedHours = diffMs / (1e3 * 60 * 60);
+          const workedFormatted = workedHours.toFixed(1);
+          if (workedHours < 8) {
+            data.method = `${data.method} (Worked: ${workedFormatted}h - Half Day (<8h))`;
+          } else {
+            data.method = `${data.method} (Worked: ${workedFormatted}h - Full Day (>=8h))`;
+          }
+        } else {
+          data.method = `${data.method} (Direct Logout)`;
+        }
+      } catch (err) {
+        console.warn("[AttendanceService] Could not evaluate worked duration:", err);
+      }
     }
     return AttendanceRepository.createPunch({
       ...data,
@@ -11121,8 +11187,7 @@ var AttendanceService = class {
   static async saveRosters(week, rosters, organizationId) {
     const results = [];
     for (const item of rosters) {
-      let resolvedEmpId = item.employeeId;
-      const emp = await prisma.employee.findFirst({
+      let emp = await prisma.employee.findFirst({
         where: {
           OR: [
             { id: item.employeeId },
@@ -11132,17 +11197,424 @@ var AttendanceService = class {
           ...organizationId ? { organizationId } : {}
         }
       });
-      if (emp) {
-        resolvedEmpId = emp.id;
+      if (!emp && organizationId) {
+        emp = await prisma.employee.findFirst({
+          where: {
+            OR: [
+              { id: item.employeeId },
+              { userId: item.employeeId },
+              { email: { equals: item.employeeId, mode: "insensitive" } }
+            ]
+          }
+        });
+      }
+      if (!emp) {
+        console.warn(`[Attendance Service] Employee with ID '${item.employeeId}' not found in DB. Skipping roster item.`);
+        continue;
       }
       const res = await AttendanceRepository.upsertRoster({
         ...item,
-        employeeId: resolvedEmpId,
+        employeeId: emp.id,
         week
       });
       results.push(res);
     }
     return results;
+  }
+  /**
+   * Automatic punch-out for employees who punched In but forgot to punch Out by midnight (12:00 AM).
+   * Runs as a background task, on server startup, and prior to querying attendance records.
+   */
+  static async autoPunchOutPendingUsers(organizationId) {
+    try {
+      const now = /* @__PURE__ */ new Date();
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      const pendingInPunches = await prisma.attendancePunch.findMany({
+        where: {
+          type: { in: ["In", "IN", "in"] },
+          createdAt: { lt: startOfToday },
+          ...organizationId ? {
+            employee: {
+              organizationId
+            }
+          } : {}
+        },
+        orderBy: { createdAt: "asc" }
+      });
+      for (const inPunch of pendingInPunches) {
+        const punchCreatedAt = new Date(inPunch.createdAt);
+        const startOfDay = new Date(punchCreatedAt.getFullYear(), punchCreatedAt.getMonth(), punchCreatedAt.getDate(), 0, 0, 0, 0);
+        const endOfDay = new Date(punchCreatedAt.getFullYear(), punchCreatedAt.getMonth(), punchCreatedAt.getDate(), 23, 59, 59, 999);
+        const hasOut = await prisma.attendancePunch.findFirst({
+          where: {
+            employeeId: inPunch.employeeId,
+            type: { in: ["Out", "OUT", "out"] },
+            createdAt: {
+              gte: startOfDay,
+              lte: new Date(endOfDay.getTime() + 60 * 60 * 1e3)
+              // up to 1hr past midnight
+            }
+          }
+        });
+        if (!hasOut) {
+          const midnight = endOfDay;
+          const diffMs = midnight.getTime() - punchCreatedAt.getTime();
+          const workedHours = (diffMs / (1e3 * 60 * 60)).toFixed(1);
+          await prisma.attendancePunch.create({
+            data: {
+              employeeId: inPunch.employeeId,
+              type: "Out",
+              method: `Auto Punch-Out (System 12:00 AM - Worked: ${workedHours}h)`,
+              time: "12:00 AM (Auto Punch-Out)",
+              lat: inPunch.lat || 0,
+              lng: inPunch.lng || 0,
+              createdAt: midnight,
+              updatedAt: midnight
+            }
+          });
+        }
+      }
+    } catch (err) {
+      console.error("[AttendanceService] Error in autoPunchOutPendingUsers:", err);
+    }
+  }
+  /**
+   * Retrieves full monthly Muster Roll matrix and attendance statistics
+   * Evaluates on-time/late arrival (>15m = Half Day, 1-15m = Late), 8-hour worked threshold,
+   * week offs, approved leaves, and automatic punch outs.
+   */
+  static async getMusterRoll(query, organizationId, requestingUser) {
+    await this.autoPunchOutPendingUsers(organizationId);
+    const now = /* @__PURE__ */ new Date();
+    const targetMonth = query.month ? parseInt(String(query.month), 10) : now.getMonth() + 1;
+    const targetYear = query.year ? parseInt(String(query.year), 10) : now.getFullYear();
+    const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
+    const startDate = new Date(targetYear, targetMonth - 1, 1, 0, 0, 0, 0);
+    const endDate = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999);
+    const userRoleName = (requestingUser?.role?.name || requestingUser?.role || "").toUpperCase();
+    const isPrivileged = !!(requestingUser?.isPlatformAdmin || ["SUPER_ADMIN", "ADMIN", "ORGANIZATION ADMIN", "HR MANAGER", "HR_ADMIN", "HR ADMIN"].includes(userRoleName));
+    let targetEmployeeId = query.employeeId;
+    if (!isPrivileged && requestingUser) {
+      const userEmp = await prisma.employee.findFirst({
+        where: {
+          OR: [
+            ...requestingUser.employeeId ? [{ id: requestingUser.employeeId }] : [],
+            ...requestingUser.id ? [{ userId: requestingUser.id }] : [],
+            ...requestingUser.email ? [{ email: { equals: requestingUser.email, mode: "insensitive" } }] : []
+          ],
+          ...organizationId ? { organizationId } : {}
+        }
+      });
+      if (userEmp) {
+        targetEmployeeId = userEmp.id;
+      }
+    }
+    const employeeWhere = {
+      status: { not: "TERMINATED" }
+    };
+    if (organizationId) {
+      employeeWhere.organizationId = organizationId;
+    }
+    if (targetEmployeeId) {
+      employeeWhere.OR = [
+        { id: targetEmployeeId },
+        { userId: targetEmployeeId }
+      ];
+    }
+    if (isPrivileged) {
+      employeeWhere.NOT = [
+        { user: { role: { name: { in: ["SUPER_ADMIN", "Organization Admin", "ORGANIZATION ADMIN", "Super Admin"] } } } },
+        { email: "info@symbosys.com" },
+        ...requestingUser?.id ? [{ userId: requestingUser.id }] : [],
+        ...requestingUser?.email ? [{ email: { equals: requestingUser.email, mode: "insensitive" } }] : [],
+        ...requestingUser?.employeeId ? [{ id: requestingUser.employeeId }] : []
+      ];
+    }
+    const employees = await prisma.employee.findMany({
+      where: employeeWhere,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        designation: true,
+        avatar: true,
+        userId: true,
+        department: {
+          select: {
+            name: true
+          }
+        }
+      },
+      orderBy: { name: "asc" }
+    });
+    const empIds = employees.map((e) => e.id);
+    const userIds = employees.map((e) => e.userId).filter(Boolean);
+    const allEmployeeKeys = Array.from(/* @__PURE__ */ new Set([...empIds, ...userIds]));
+    const [punches, leaves, regularizations, rosters, shifts] = await Promise.all([
+      prisma.attendancePunch.findMany({
+        where: {
+          employeeId: { in: allEmployeeKeys },
+          createdAt: {
+            gte: startDate,
+            lte: endDate
+          }
+        },
+        orderBy: { createdAt: "asc" }
+      }),
+      prisma.leaveRequest.findMany({
+        where: {
+          employeeId: { in: allEmployeeKeys },
+          status: "APPROVED",
+          startDate: { lte: endDate },
+          endDate: { gte: startDate }
+        }
+      }),
+      prisma.attendanceRegularization.findMany({
+        where: {
+          employeeId: { in: allEmployeeKeys },
+          status: "Approved"
+        }
+      }),
+      prisma.shiftRoster.findMany({
+        where: {
+          employeeId: { in: allEmployeeKeys }
+        },
+        orderBy: { updatedAt: "desc" }
+      }),
+      prisma.shift.findMany({
+        where: organizationId ? { organizationId } : {}
+      })
+    ]);
+    const dayNames = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+    const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    let totalMonthPresentDays = 0;
+    let totalMonthLateDays = 0;
+    let totalMonthHalfDays = 0;
+    let totalMonthAbsentDays = 0;
+    let totalMonthWeekOffDays = 0;
+    let totalMonthLeaveDays = 0;
+    let todayPresent = 0;
+    let todayAbsent = 0;
+    let todayLate = 0;
+    let todayHalfDay = 0;
+    let todayLeave = 0;
+    let todayWeekOff = 0;
+    const employeeRecords = employees.map((emp) => {
+      let empPresent = 0;
+      let empLate = 0;
+      let empHalfDay = 0;
+      let empAbsent = 0;
+      let empWeekOff = 0;
+      let empLeave = 0;
+      let empWorkedHours = 0;
+      const empRoster = rosters.find((r) => r.employeeId === emp.id || r.employeeId === emp.userId);
+      const days = Array.from({ length: daysInMonth }, (_, i) => {
+        const dayNum = i + 1;
+        const dateStr = `${targetYear}-${String(targetMonth).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`;
+        const currentDate = new Date(targetYear, targetMonth - 1, dayNum, 12, 0, 0);
+        const isFuture = currentDate.getTime() > todayMidnight.getTime();
+        const isToday = now.getFullYear() === targetYear && now.getMonth() + 1 === targetMonth && now.getDate() === dayNum;
+        const dayPunches = punches.filter((p) => {
+          const isEmp = p.employeeId === emp.id || p.employeeId === emp.userId;
+          if (!isEmp) return false;
+          const pDate = new Date(p.createdAt);
+          return pDate.getFullYear() === targetYear && pDate.getMonth() + 1 === targetMonth && pDate.getDate() === dayNum;
+        });
+        const dayOfWeek = currentDate.getDay();
+        const dayKey = dayNames[dayOfWeek] ?? "mon";
+        const rosterVal = empRoster ? String(empRoster[dayKey] || "").trim() : "";
+        const isWeekOff = rosterVal.toUpperCase() === "WEEK OFF" || rosterVal.toUpperCase() === "OFF" || rosterVal.toUpperCase() === "WO" || !empRoster && (dayOfWeek === 0 || dayOfWeek === 6);
+        const isLeave = leaves.some((l) => {
+          const isEmp = l.employeeId === emp.id || l.employeeId === emp.userId;
+          if (!isEmp) return false;
+          const lStart = new Date(l.startDate);
+          const lEnd = new Date(l.endDate);
+          const cur = new Date(targetYear, targetMonth - 1, dayNum);
+          return cur >= new Date(lStart.getFullYear(), lStart.getMonth(), lStart.getDate()) && cur <= new Date(lEnd.getFullYear(), lEnd.getMonth(), lEnd.getDate());
+        });
+        const isRegularized = regularizations.some((r) => {
+          const isEmp = r.employeeId === emp.id || r.employeeId === emp.userId;
+          return isEmp && r.date === dateStr;
+        });
+        let status = "-";
+        let inTime = null;
+        let outTime = null;
+        let workedHours = 0;
+        let details = "";
+        if (isFuture) {
+          status = "-";
+          details = "Upcoming";
+        } else if (isRegularized) {
+          status = "P";
+          details = "Regularized Attendance (Present)";
+          empPresent++;
+          totalMonthPresentDays++;
+          if (isToday) todayPresent++;
+        } else if (dayPunches.length > 0) {
+          const inPunch = dayPunches.find((p) => p.type.toLowerCase() === "in");
+          const outPunch = [...dayPunches].reverse().find((p) => p.type.toLowerCase() === "out");
+          if (inPunch) {
+            inTime = inPunch.time;
+            const inDate = new Date(inPunch.createdAt);
+            const inMins = inDate.getHours() * 60 + inDate.getMinutes();
+            let shiftStartMins = 9 * 60 + 30;
+            if (rosterVal) {
+              const sh = shifts.find(
+                (s) => s.code.toLowerCase() === rosterVal.toLowerCase() || s.name.toLowerCase() === rosterVal.toLowerCase()
+              );
+              if (sh?.startTime) shiftStartMins = parseTimeToMinutes(sh.startTime);
+            }
+            const lateMins = inMins - shiftStartMins;
+            const isLateOver15 = lateMins > 15;
+            const isLateGrace = lateMins > 0 && lateMins <= 15;
+            if (outPunch) {
+              outTime = outPunch.time;
+              const outDate = new Date(outPunch.createdAt);
+              workedHours = Math.max(0, (outDate.getTime() - inDate.getTime()) / (1e3 * 60 * 60));
+              empWorkedHours += workedHours;
+              if (workedHours < 8) {
+                status = "HD";
+                details = `Worked ${workedHours.toFixed(1)}h (< 8h required) -> Half Day`;
+                empHalfDay++;
+                totalMonthHalfDays++;
+                if (isToday) todayHalfDay++;
+              } else if (isLateOver15) {
+                status = "HD";
+                details = `Late by ${lateMins}m (> 15m late) -> Half Day`;
+                empHalfDay++;
+                totalMonthHalfDays++;
+                if (isToday) todayHalfDay++;
+              } else if (isLateGrace) {
+                status = "L";
+                details = `Late by ${lateMins}m (Grace period) & worked ${workedHours.toFixed(1)}h -> Late`;
+                empLate++;
+                totalMonthLateDays++;
+                if (isToday) todayLate++;
+              } else {
+                status = "P";
+                details = `On-time & worked ${workedHours.toFixed(1)}h -> Present (Full Day)`;
+                empPresent++;
+                totalMonthPresentDays++;
+                if (isToday) todayPresent++;
+              }
+            } else {
+              if (isToday) {
+                if (isLateOver15) {
+                  status = "HD";
+                  details = `Punched in late by ${lateMins}m (> 15m) -> Half Day (In Progress)`;
+                  empHalfDay++;
+                  totalMonthHalfDays++;
+                  todayHalfDay++;
+                } else if (isLateGrace) {
+                  status = "L";
+                  details = `Punched in late by ${lateMins}m -> Late (In Progress)`;
+                  empLate++;
+                  totalMonthLateDays++;
+                  todayLate++;
+                } else {
+                  status = "P";
+                  details = `Punched in on time -> Present (In Progress)`;
+                  empPresent++;
+                  totalMonthPresentDays++;
+                  todayPresent++;
+                }
+              } else {
+                status = "HD";
+                details = `Missing punch out -> Auto Half Day`;
+                empHalfDay++;
+                totalMonthHalfDays++;
+              }
+            }
+          } else if (outPunch) {
+            outTime = outPunch.time;
+            status = "HD";
+            details = "Only punch-out recorded -> Half Day";
+            empHalfDay++;
+            totalMonthHalfDays++;
+            if (isToday) todayHalfDay++;
+          }
+        } else {
+          if (isLeave) {
+            status = "LV";
+            details = "Approved Leave";
+            empLeave++;
+            totalMonthLeaveDays++;
+            if (isToday) todayLeave++;
+          } else if (isWeekOff) {
+            status = "WO";
+            details = "Scheduled Week Off";
+            empWeekOff++;
+            totalMonthWeekOffDays++;
+            if (isToday) todayWeekOff++;
+          } else if (isToday) {
+            const nowMins = now.getHours() * 60 + now.getMinutes();
+            if (nowMins < 9 * 60 + 30) {
+              status = "-";
+              details = "Shift not started yet";
+            } else {
+              status = "A";
+              details = "Absent Today";
+              empAbsent++;
+              totalMonthAbsentDays++;
+              todayAbsent++;
+            }
+          } else {
+            status = "A";
+            details = "Absent";
+            empAbsent++;
+            totalMonthAbsentDays++;
+          }
+        }
+        return {
+          day: dayNum,
+          date: dateStr,
+          status,
+          inTime,
+          outTime,
+          workedHours: Number(workedHours.toFixed(1)),
+          details
+        };
+      });
+      return {
+        id: emp.id,
+        name: emp.name,
+        email: emp.email,
+        department: emp.department?.name || void 0,
+        designation: emp.designation,
+        avatar: emp.avatar,
+        counts: {
+          present: empPresent,
+          late: empLate,
+          halfDay: empHalfDay,
+          absent: empAbsent,
+          weekOff: empWeekOff,
+          leave: empLeave,
+          totalWorkedHours: Number(empWorkedHours.toFixed(1))
+        },
+        days
+      };
+    });
+    return {
+      month: targetMonth,
+      year: targetYear,
+      daysInMonth,
+      summary: {
+        totalStaff: employees.length,
+        presentToday: todayPresent,
+        absentToday: todayAbsent,
+        lateToday: todayLate,
+        halfDayToday: todayHalfDay,
+        leaveToday: todayLeave,
+        weekOffToday: todayWeekOff,
+        totalPresentDays: totalMonthPresentDays,
+        totalLateDays: totalMonthLateDays,
+        totalHalfDays: totalMonthHalfDays,
+        totalAbsentDays: totalMonthAbsentDays,
+        totalWeekOffDays: totalMonthWeekOffDays,
+        totalLeaveDays: totalMonthLeaveDays
+      },
+      employees: employeeRecords
+    };
   }
 };
 function calculateDistance(lat1, lon1, lat2, lon2) {
@@ -11358,10 +11830,30 @@ var deleteShiftTiming = asyncHandler(async (req, res, next) => {
     200 /* OK */
   );
 });
+var getMusterRoll = asyncHandler(async (req, res, next) => {
+  const organizationId = req.user?.organizationId;
+  const requestingUser = req.user;
+  const musterRoll = await AttendanceService.getMusterRoll(
+    {
+      month: req.query.month,
+      year: req.query.year,
+      employeeId: req.query.employeeId
+    },
+    organizationId,
+    requestingUser
+  );
+  return SuccessResponse(
+    res,
+    "Muster roll retrieved successfully",
+    musterRoll,
+    200 /* OK */
+  );
+});
 
 // src/module/attendance/routes/attendance.routes.ts
 var router3 = Router3();
 router3.use(protect);
+router3.get("/muster-roll", hasPermission("VIEW_MUSTER_ROLL", "VIEW_ATTENDANCE"), getMusterRoll);
 router3.get("/punches/:employeeId", hasPermission("VIEW_GPS_SELFIE_PUNCH", "VIEW_ATTENDANCE"), getPunches);
 router3.post("/punches", hasPermission("CREATE_GPS_SELFIE_PUNCH", "CREATE_ATTENDANCE"), createPunch);
 router3.get("/regularizations", hasPermission("VIEW_ATTENDANCE_REGULARIZATION", "VIEW_ATTENDANCE"), getRegularizations);
@@ -11651,7 +12143,10 @@ var DepartmentRepository = class {
   static async findAll(organizationId) {
     const where = {};
     if (organizationId) {
-      where.organizationId = organizationId;
+      where.OR = [
+        { organizationId },
+        { organizationId: null }
+      ];
     }
     return prisma.department.findMany({
       where,
@@ -11723,14 +12218,22 @@ var DepartmentRepository = class {
 var DepartmentService = class {
   static async createDepartment(data, organizationId) {
     const cleanName = data.name.trim();
-    const cleanCode = data.code.trim().toUpperCase();
+    let cleanCode = data.code?.trim().toUpperCase();
+    if (!cleanCode) {
+      const words = cleanName.split(/\s+/);
+      if (words.length > 1) {
+        cleanCode = words.map((w) => w[0]).join("").toUpperCase().slice(0, 5);
+      } else {
+        cleanCode = cleanName.slice(0, 3).toUpperCase();
+      }
+    }
     const existingName = await DepartmentRepository.findByName(cleanName, organizationId);
     if (existingName) {
-      throw new ErrorResponse(`Department with name "${cleanName}" already exists. Please choose a different name.`, 409 /* Conflict */);
+      throw new ErrorResponse(`Department with name "${cleanName}" already exists in this organization.`, 409 /* Conflict */);
     }
     const existingCode = await DepartmentRepository.findByCode(cleanCode, organizationId);
     if (existingCode) {
-      throw new ErrorResponse(`Department code "${cleanCode}" already exists. Please choose a different code.`, 409 /* Conflict */);
+      throw new ErrorResponse(`Department code "${cleanCode}" already exists in this organization.`, 409 /* Conflict */);
     }
     let resolvedManagerId = null;
     if (data.managerId) {
@@ -11748,6 +12251,8 @@ var DepartmentService = class {
     }
     return DepartmentRepository.create({
       ...data,
+      name: cleanName,
+      code: cleanCode,
       managerId: resolvedManagerId,
       organizationId: organizationId || null
     });
@@ -11814,8 +12319,8 @@ var DepartmentService = class {
 import { z as z4 } from "zod";
 var createDepartmentSchema = z4.object({
   name: z4.string({ message: "Department name is required" }).min(2, "Department name must be at least 2 characters").max(100, "Department name must not exceed 100 characters"),
-  code: z4.string({ message: "Department code is required" }).min(2, "Department code must be at least 2 characters").max(20, "Department code must not exceed 20 characters").toUpperCase(),
-  description: z4.string().optional(),
+  code: z4.string().min(2, "Department code must be at least 2 characters").max(20, "Department code must not exceed 20 characters").toUpperCase().optional(),
+  description: z4.string().optional().nullable(),
   managerId: z4.string().nullable().optional(),
   parentId: z4.string().nullable().optional()
 });
@@ -11833,7 +12338,8 @@ var createDepartment = asyncHandler(async (req, res, next) => {
   if (!parsed.success) {
     return next(parsed.error);
   }
-  const department = await DepartmentService.createDepartment(parsed.data, req.user?.organizationId);
+  const organizationId = req.headers["x-organization-id"] || req.query.organizationId || req.user?.organizationId;
+  const department = await DepartmentService.createDepartment(parsed.data, organizationId);
   return SuccessResponse(
     res,
     "Department created successfully",
@@ -11842,7 +12348,8 @@ var createDepartment = asyncHandler(async (req, res, next) => {
   );
 });
 var getDepartments = asyncHandler(async (req, res, next) => {
-  const departments = await DepartmentService.getDepartments(req.user?.organizationId);
+  const organizationId = req.headers["x-organization-id"] || req.query.organizationId || req.user?.organizationId;
+  const departments = await DepartmentService.getDepartments(organizationId);
   return SuccessResponse(
     res,
     "Departments retrieved successfully",
@@ -11866,7 +12373,8 @@ var updateDepartment = asyncHandler(async (req, res, next) => {
   if (!parsed.success) {
     return next(parsed.error);
   }
-  const updatedDepartment = await DepartmentService.updateDepartment(id, parsed.data, req.user?.organizationId);
+  const organizationId = req.headers["x-organization-id"] || req.query.organizationId || req.user?.organizationId;
+  const updatedDepartment = await DepartmentService.updateDepartment(id, parsed.data, organizationId);
   return SuccessResponse(
     res,
     "Department updated successfully",
@@ -12153,7 +12661,8 @@ var uploadAvatar = asyncHandler(async (req, res, next) => {
     throw new ErrorResponse("No file or image payload provided", 400 /* Bad_Request */);
   }
   const avatarUrl = result.secure_url || result.url;
-  if (req.user) {
+  const shouldUpdateSelf = req.query?.updateSelf === "true" || req.body?.updateSelf === "true" || req.body?.updateSelf === true;
+  if (shouldUpdateSelf && req.user) {
     try {
       const conditions = [];
       if (req.user.id) conditions.push({ userId: req.user.id });
@@ -12270,6 +12779,11 @@ var EmployeeRepository = class {
         { id: { contains: filters.search, mode: "insensitive" } }
       ];
     }
+    whereClause.NOT = [
+      { user: { role: { name: { in: ["SUPER_ADMIN", "Organization Admin", "ORGANIZATION ADMIN", "Super Admin", "ADMIN"] } } } },
+      { name: { startsWith: "Admin -" } },
+      { email: { in: ["info@symbosys.com", "info@symbosys2.com", "info@technova.com"] } }
+    ];
     return prisma.employee.findMany({
       where: whereClause,
       include: {
@@ -12450,6 +12964,23 @@ var EmployeeService = class {
         throw new ErrorResponse("This User account is already linked to another employee", 409 /* Conflict */);
       }
     }
+    const effectiveOrgId = organizationId || (await prisma.organization.findFirst())?.id || null;
+    if (!data.departmentId && data.department) {
+      const cleanDept = String(data.department).trim();
+      const matchedDept = await prisma.department.findFirst({
+        where: {
+          OR: [
+            { id: cleanDept },
+            { name: { equals: cleanDept, mode: "insensitive" } },
+            { code: { equals: cleanDept.toUpperCase() } }
+          ],
+          ...effectiveOrgId ? { organizationId: effectiveOrgId } : {}
+        }
+      });
+      if (matchedDept) {
+        data.departmentId = matchedDept.id;
+      }
+    }
     if (data.departmentId) {
       const dept = await EmployeeRepository.findDepartmentById(data.departmentId);
       if (!dept) {
@@ -12481,8 +13012,8 @@ var EmployeeService = class {
         throw new ErrorResponse("An employee cannot be their own manager", 400 /* Bad_Request */);
       }
     }
-    const effectiveOrgId = organizationId || (await prisma.organization.findFirst())?.id || null;
-    const { roleId: requestedRoleId, ...employeeFields } = data;
+    const { roleId: requestedRoleId, department: _rawDept, ...employeeFields } = data;
+    employeeFields.departmentId = data.departmentId || null;
     const rawPassword = data.password || "Password@123";
     const hashedPassword = crypto4.createHash("sha256").update(rawPassword).digest("hex");
     employeeFields.password = hashedPassword;
@@ -12490,32 +13021,27 @@ var EmployeeService = class {
       try {
         let assignedRoleId = null;
         if (requestedRoleId) {
-          const matchedRole = await prisma.role.findUnique({
-            where: { id: requestedRoleId }
+          const matchedRole = await prisma.role.findFirst({
+            where: {
+              OR: [
+                { id: requestedRoleId },
+                { name: { equals: requestedRoleId, mode: "insensitive" } }
+              ],
+              ...effectiveOrgId ? { OR: [{ organizationId: effectiveOrgId }, { organizationId: null }] } : {}
+            }
           });
           if (matchedRole) {
             assignedRoleId = matchedRole.id;
           }
         }
-        if (!assignedRoleId) {
-          let empRole = await prisma.role.findFirst({
-            where: {
-              name: "EMPLOYEE",
-              ...effectiveOrgId ? { OR: [{ organizationId: effectiveOrgId }, { organizationId: null }] } : {}
-            },
-            orderBy: { organizationId: "desc" }
+        if (!assignedRoleId && effectiveOrgId) {
+          const existingRole = await prisma.role.findFirst({
+            where: { organizationId: effectiveOrgId },
+            orderBy: { createdAt: "asc" }
           });
-          if (!empRole) {
-            empRole = await prisma.role.create({
-              data: {
-                name: "EMPLOYEE",
-                description: "Standard employee role",
-                isSystem: true,
-                organizationId: effectiveOrgId || null
-              }
-            });
+          if (existingRole) {
+            assignedRoleId = existingRole.id;
           }
-          assignedRoleId = empRole.id;
         }
         let targetUser = null;
         if (data.userId) {
@@ -12629,11 +13155,44 @@ var EmployeeService = class {
         throw new ErrorResponse("This User account is already linked to another employee", 409 /* Conflict */);
       }
     }
+    const effectiveOrgId = employee.organizationId || null;
+    if (data.departmentId === "") {
+      data.departmentId = null;
+    }
+    if (!data.departmentId && data.department) {
+      const cleanDept = String(data.department).trim();
+      const matchedDept = await prisma.department.findFirst({
+        where: {
+          OR: [
+            { id: cleanDept },
+            { name: { equals: cleanDept, mode: "insensitive" } },
+            { code: { equals: cleanDept.toUpperCase() } }
+          ],
+          ...effectiveOrgId ? { organizationId: effectiveOrgId } : {}
+        }
+      });
+      if (matchedDept) {
+        data.departmentId = matchedDept.id;
+      }
+    }
     if (data.departmentId && data.departmentId !== employee.departmentId) {
       const dept = await EmployeeRepository.findDepartmentById(data.departmentId);
       if (!dept) {
-        console.warn(`[Employee Service] Department with ID ${data.departmentId} not found. Setting departmentId to null.`);
-        data.departmentId = null;
+        const deptByName = await prisma.department.findFirst({
+          where: {
+            OR: [
+              { name: { equals: data.departmentId, mode: "insensitive" } },
+              { code: { equals: data.departmentId.toUpperCase() } }
+            ],
+            ...effectiveOrgId ? { organizationId: effectiveOrgId } : {}
+          }
+        });
+        if (deptByName) {
+          data.departmentId = deptByName.id;
+        } else {
+          console.warn(`[Employee Service] Department with ID ${data.departmentId} not found. Setting departmentId to null.`);
+          data.departmentId = null;
+        }
       }
     }
     if (data.managerId && data.managerId !== employee.managerId) {
@@ -12680,7 +13239,17 @@ var EmployeeService = class {
         }
       }
     }
-    return EmployeeRepository.update(id, data);
+    if (data.roleId) {
+      const targetUserId = data.userId || employee.userId;
+      if (targetUserId) {
+        await prisma.user.update({
+          where: { id: targetUserId },
+          data: { roleId: data.roleId }
+        }).catch((err) => console.warn("[Employee Service] Failed to sync user role on update:", err.message));
+      }
+    }
+    const { department: _rawDept, role: _rawRole, ...updatePayload } = data;
+    return EmployeeRepository.update(id, updatePayload);
   }
   static async deleteEmployee(id) {
     const employee = await EmployeeRepository.findById(id);
@@ -12960,10 +13529,12 @@ var createEmployeeSchema = z6.object({
   location: z6.string().optional().nullable(),
   address: z6.string().optional().nullable(),
   designation: z6.string().optional().nullable(),
+  role: z6.string().optional().nullable(),
   // Relations
   userId: z6.string().optional().nullable(),
   roleId: z6.string().optional().nullable(),
   departmentId: z6.string().optional().nullable(),
+  department: z6.string().optional().nullable(),
   managerId: z6.string().optional().nullable(),
   // Salary Details
   basic: z6.number().optional().nullable(),
@@ -13013,7 +13584,8 @@ var createEmployeeSchema = z6.object({
   const basic = data.basic !== void 0 && data.basic !== null ? data.basic : data.salary;
   const netSalary = data.netSalary !== void 0 && data.netSalary !== null ? data.netSalary : basic;
   const dob = data.dob || data.dateOfBirth;
-  const { employeeId, firstName, lastName, address, salary, dateOfBirth, ...rest } = data;
+  const designation = data.designation !== void 0 ? data.designation : data.role;
+  const { employeeId, firstName, lastName, address, salary, dateOfBirth, role, ...rest } = data;
   return {
     ...rest,
     id,
@@ -13021,7 +13593,8 @@ var createEmployeeSchema = z6.object({
     location,
     basic,
     netSalary,
-    dob
+    dob,
+    ...designation !== void 0 ? { designation } : {}
   };
 });
 var updateEmployeeSchema = z6.object({
@@ -13037,9 +13610,11 @@ var updateEmployeeSchema = z6.object({
   location: z6.string().optional().nullable(),
   address: z6.string().optional().nullable(),
   designation: z6.string().optional().nullable(),
+  role: z6.string().optional().nullable(),
   // Relations
   userId: z6.string().optional().nullable(),
   departmentId: z6.string().optional().nullable(),
+  department: z6.string().optional().nullable(),
   managerId: z6.string().optional().nullable(),
   // Salary Details
   basic: z6.number().optional().nullable(),
@@ -13079,14 +13654,16 @@ var updateEmployeeSchema = z6.object({
     name = [data.firstName, data.lastName].filter(Boolean).join(" ");
   }
   const location = data.location || data.address;
+  const designation = data.designation !== void 0 ? data.designation : data.role;
   const basic = data.basic !== void 0 && data.basic !== null ? data.basic : data.salary;
   const netSalary = data.netSalary !== void 0 && data.netSalary !== null ? data.netSalary : basic;
   const dob = data.dob || data.dateOfBirth;
-  const { firstName, lastName, address, salary, dateOfBirth, ...rest } = data;
+  const { firstName, lastName, address, salary, dateOfBirth, role, ...rest } = data;
   return {
     ...rest,
     ...name ? { name } : {},
     ...location ? { location } : {},
+    ...designation !== void 0 ? { designation } : {},
     ...basic !== void 0 ? { basic } : {},
     ...netSalary !== void 0 ? { netSalary } : {},
     ...dob ? { dob } : {}
@@ -15120,32 +15697,25 @@ var OrganizationRepository = class {
     const { address, password, ...orgData } = data;
     const plainPassword = password || "Admin@123";
     const hashedPassword = hashPassword(plainPassword);
-    const allPermissions = await prisma.permission.findMany({ select: { id: true } });
-    let superAdminRole = await prisma.role.findFirst({
-      where: { name: "SUPER_ADMIN" }
+    const organization = await prisma.organization.create({
+      data: {
+        ...orgData,
+        address: address ? { create: address } : void 0
+      },
+      include: { address: true }
     });
-    if (!superAdminRole) {
-      superAdminRole = await prisma.role.create({
-        data: {
-          id: "role_super_admin",
-          name: "SUPER_ADMIN",
-          description: "Full system control with all permissions",
-          isSystem: true,
-          permissions: {
-            connect: allPermissions.map((p) => ({ id: p.id }))
-          }
+    const allPermissions = await prisma.permission.findMany({ select: { id: true } });
+    const superAdminRole = await prisma.role.create({
+      data: {
+        name: "SUPER_ADMIN",
+        description: `Super Admin role for ${orgData.name} \u2014 full access to all modules`,
+        isSystem: true,
+        organizationId: organization.id,
+        permissions: {
+          connect: allPermissions.map((p) => ({ id: p.id }))
         }
-      });
-    } else {
-      await prisma.role.update({
-        where: { id: superAdminRole.id },
-        data: {
-          permissions: {
-            set: allPermissions.map((p) => ({ id: p.id }))
-          }
-        }
-      });
-    }
+      }
+    });
     const user = await prisma.user.create({
       data: {
         name: `Admin - ${orgData.name}`,
@@ -15155,14 +15725,7 @@ var OrganizationRepository = class {
         roleId: superAdminRole.id
       }
     });
-    console.log(`[Onboarding] Created dedicated admin user ${user.id} with SUPER_ADMIN permissions for organization ${orgData.name}`);
-    const organization = await prisma.organization.create({
-      data: {
-        ...orgData,
-        address: address ? { create: address } : void 0
-      },
-      include: { address: true }
-    });
+    console.log(`[Onboarding] Created dedicated admin user ${user.id} with org-scoped SUPER_ADMIN role for organization ${orgData.name}`);
     await prisma.membership.create({
       data: {
         userId: user.id,
@@ -16669,7 +17232,13 @@ var PayrollService = class {
   }
   // Bulk salary revisions
   static async applyBulkRevision(incrementPercentage, departmentId, organizationId) {
-    const empWhere = { status: "ACTIVE" };
+    const empWhere = {
+      status: { notIn: ["TERMINATED", "RESIGNED"] },
+      NOT: [
+        { user: { role: { name: { in: ["SUPER_ADMIN", "Organization Admin", "ORGANIZATION ADMIN", "Super Admin", "ADMIN"] } } } },
+        { name: { startsWith: "Admin -" } }
+      ]
+    };
     if (departmentId) empWhere.departmentId = departmentId;
     if (organizationId) empWhere.organizationId = organizationId;
     const employees = await prisma.employee.findMany({
@@ -18357,6 +18926,41 @@ var getActiveMembership = async (userId) => {
   return membership;
 };
 var linkOrCreateEmployeeForUser = async (user, organizationId) => {
+  let roleName = user.role?.name;
+  if (!roleName && user.roleId) {
+    try {
+      const roleObj = await prisma.role.findUnique({ where: { id: user.roleId } });
+      roleName = roleObj?.name;
+    } catch (_) {
+    }
+  }
+  if (!roleName && user.id) {
+    try {
+      const membership = await prisma.membership.findFirst({
+        where: { userId: user.id, status: "ACTIVE" },
+        include: { role: true }
+      });
+      roleName = membership?.role?.name;
+    } catch (_) {
+    }
+  }
+  const roleUpper = String(roleName || "").toUpperCase();
+  const isAdminOrOrg = roleUpper === "SUPER_ADMIN" || roleUpper === "ORGANIZATION ADMIN" || roleUpper === "ADMIN" || roleUpper === "SUPER ADMIN" || roleUpper === "HR_ADMIN" || user.name && user.name.startsWith("Admin -") || user.email === "info@symbosys.com";
+  if (isAdminOrOrg) {
+    try {
+      await prisma.employee.deleteMany({
+        where: {
+          OR: [
+            { userId: user.id },
+            ...user.email ? [{ email: { equals: user.email, mode: "insensitive" } }] : []
+          ]
+        }
+      });
+    } catch (e) {
+      console.warn("[Auth] Notice cleaning admin from employee records:", e.message);
+    }
+    return null;
+  }
   let employee = null;
   try {
     employee = await prisma.employee.findUnique({
@@ -18366,10 +18970,7 @@ var linkOrCreateEmployeeForUser = async (user, organizationId) => {
     console.warn(`[Auth Controller] Error finding employee by userId:`, err.message || err);
   }
   if (!employee) {
-    if (user.role?.name === "SUPER_ADMIN" || user.roleId === "role_super_admin") {
-      return null;
-    }
-    if (!employee && user.email) {
+    if (user.email) {
       employee = await prisma.employee.findFirst({
         where: { email: user.email }
       });
@@ -19234,11 +19835,19 @@ app.use(error_middleware_default);
 syncDatabase().then(() => {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on port ${PORT} (0.0.0.0)`);
+    AttendanceService.autoPunchOutPendingUsers();
+    setInterval(() => {
+      AttendanceService.autoPunchOutPendingUsers();
+    }, 15 * 60 * 1e3);
   });
 }).catch((err) => {
   console.error("Database sync failed, starting server anyway...", err);
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on port ${PORT} (0.0.0.0)`);
+    AttendanceService.autoPunchOutPendingUsers();
+    setInterval(() => {
+      AttendanceService.autoPunchOutPendingUsers();
+    }, 15 * 60 * 1e3);
   });
 });
 /*! Bundled license information:

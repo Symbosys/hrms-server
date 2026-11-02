@@ -1881,6 +1881,48 @@ export async function syncDatabase() {
         console.warn("[DB Sync] Notice checking org roles:", roleSyncErr.message);
       }
 
+      // Auto-repair any operational employees who were accidentally linked to SUPER_ADMIN role
+      try {
+        const misassignedEmployees = await prisma.employee.findMany({
+          where: {
+            NOT: [
+              { name: { startsWith: "Admin -" } },
+              { email: { in: ["info@symbosys.com", "info@symbosys2.com", "info@technova.com", "platform@hrms.com", "admin@hrms.com"] } },
+            ],
+            user: {
+              role: {
+                name: { in: ["SUPER_ADMIN", "SUPER ADMIN"] }
+              }
+            }
+          },
+          include: { user: true }
+        });
+
+        for (const emp of misassignedEmployees) {
+          if (emp.userId && emp.organizationId) {
+            const orgEmpRole = await prisma.role.findFirst({
+              where: {
+                organizationId: emp.organizationId,
+                name: { in: ["EMPLOYEE", "Employee"] }
+              }
+            });
+            if (orgEmpRole) {
+              await prisma.user.update({
+                where: { id: emp.userId },
+                data: { roleId: orgEmpRole.id }
+              });
+              await prisma.membership.updateMany({
+                where: { userId: emp.userId, organizationId: emp.organizationId },
+                data: { roleId: orgEmpRole.id }
+              });
+              console.log(`[DB Sync] Auto-repaired employee ${emp.name} (${emp.id}) role from SUPER_ADMIN to EMPLOYEE.`);
+            }
+          }
+        }
+      } catch (repairErr: any) {
+        console.warn("[DB Sync] Notice checking misassigned employee roles:", repairErr.message);
+      }
+
 
     }
 

@@ -9412,6 +9412,45 @@ async function syncDatabase() {
       } catch (roleSyncErr) {
         console.warn("[DB Sync] Notice checking org roles:", roleSyncErr.message);
       }
+      try {
+        const misassignedEmployees = await prisma.employee.findMany({
+          where: {
+            NOT: [
+              { name: { startsWith: "Admin -" } },
+              { email: { in: ["info@symbosys.com", "info@symbosys2.com", "info@technova.com", "platform@hrms.com", "admin@hrms.com"] } }
+            ],
+            user: {
+              role: {
+                name: { in: ["SUPER_ADMIN", "SUPER ADMIN"] }
+              }
+            }
+          },
+          include: { user: true }
+        });
+        for (const emp of misassignedEmployees) {
+          if (emp.userId && emp.organizationId) {
+            const orgEmpRole = await prisma.role.findFirst({
+              where: {
+                organizationId: emp.organizationId,
+                name: { in: ["EMPLOYEE", "Employee"] }
+              }
+            });
+            if (orgEmpRole) {
+              await prisma.user.update({
+                where: { id: emp.userId },
+                data: { roleId: orgEmpRole.id }
+              });
+              await prisma.membership.updateMany({
+                where: { userId: emp.userId, organizationId: emp.organizationId },
+                data: { roleId: orgEmpRole.id }
+              });
+              console.log(`[DB Sync] Auto-repaired employee ${emp.name} (${emp.id}) role from SUPER_ADMIN to EMPLOYEE.`);
+            }
+          }
+        }
+      } catch (repairErr) {
+        console.warn("[DB Sync] Notice checking misassigned employee roles:", repairErr.message);
+      }
     }
     await seedPermissions();
     await SubscriptionRepository.seedDefaultDataIfNeeded();
@@ -19208,6 +19247,7 @@ var verifyOtp = asyncHandler(async (req, res, next) => {
         email: employee?.email || user.email,
         phone: user.phone,
         avatar: employee?.avatar || null,
+        designation: employee?.designation || employee?.role || null,
         role: orgRole?.name || "EMPLOYEE",
         permissions: orgRole?.permissions?.map((p) => p.name) || [],
         organizationId
@@ -19489,6 +19529,7 @@ var getProfile = asyncHandler(async (req, res, next) => {
         phone: req.user.phone,
         avatar: avatarUrl,
         image: avatarUrl,
+        designation: employee?.designation || employee?.role || null,
         role: orgRole?.name || "EMPLOYEE",
         permissions: orgRole?.permissions?.map((p) => p.name) || [],
         organizationId: req.user.organizationId

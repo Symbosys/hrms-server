@@ -80,32 +80,11 @@ const linkOrCreateEmployeeForUser = async (user: any, organizationId?: string) =
   }
 
   const roleUpper = String(roleName || "").toUpperCase();
-  const isAdminOrOrg =
-    roleUpper === "SUPER_ADMIN" ||
-    roleUpper === "ORGANIZATION ADMIN" ||
-    roleUpper === "ADMIN" ||
-    roleUpper === "SUPER ADMIN" ||
-    roleUpper === "HR_ADMIN" ||
+  const isRootPlatformOrOrgAdmin =
     (user.name && user.name.startsWith("Admin -")) ||
-    user.email === "info@symbosys.com";
-
-  if (isAdminOrOrg) {
-    // Organization Admins belong to users and memberships tables, NOT operational employees table.
-    // Ensure any previously created fake employee record for this admin is cleaned up.
-    try {
-      await prisma.employee.deleteMany({
-        where: {
-          OR: [
-            { userId: user.id },
-            ...(user.email ? [{ email: { equals: user.email, mode: "insensitive" as const } }] : []),
-          ],
-        },
-      });
-    } catch (e: any) {
-      console.warn("[Auth] Notice cleaning admin from employee records:", e.message);
-    }
-    return null;
-  }
+    user.email === "info@symbosys.com" ||
+    user.email === "platform@hrms.com" ||
+    user.email === "admin@hrms.com";
 
   let employee: any = null;
   try {
@@ -114,6 +93,11 @@ const linkOrCreateEmployeeForUser = async (user: any, organizationId?: string) =
     });
   } catch (err: any) {
     console.warn(`[Auth Controller] Error finding employee by userId:`, err.message || err);
+  }
+
+  // Root platform or system organization admin accounts do not need automated dummy employee profiles
+  if (isRootPlatformOrOrgAdmin && !employee) {
+    return null;
   }
 
   if (!employee) {

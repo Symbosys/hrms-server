@@ -74,6 +74,16 @@ export class OrganizationRepository {
       },
     });
 
+    // 3.5 Create dedicated standard EMPLOYEE role for this organization
+    await prisma.role.create({
+      data: {
+        name: "EMPLOYEE",
+        description: `Standard Employee role for ${orgData.name}`,
+        isSystem: false,
+        organizationId: organization.id,
+      },
+    });
+
     // 4. Create a separate dedicated Admin User for this organization linked to the org-scoped role
     const user = await prisma.user.create({
       data: {

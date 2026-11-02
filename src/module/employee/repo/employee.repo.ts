@@ -85,11 +85,10 @@ export class EmployeeRepository {
       ];
     }
 
-    // Exclude SUPER_ADMIN / Organization Admin accounts from Employee Directory
+    // Exclude root platform / system organization admin accounts from Employee Directory
     whereClause.NOT = [
-      { user: { role: { name: { in: ["SUPER_ADMIN", "Organization Admin", "ORGANIZATION ADMIN", "Super Admin", "ADMIN"] } } } },
       { name: { startsWith: "Admin -" } },
-      { email: { in: ["info@symbosys.com", "info@symbosys2.com", "info@technova.com"] } },
+      { email: { in: ["info@symbosys.com", "info@symbosys2.com", "info@technova.com", "platform@hrms.com", "admin@hrms.com"] } },
     ];
 
     return prisma.employee.findMany({

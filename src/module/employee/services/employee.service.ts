@@ -153,12 +153,45 @@ export class EmployeeService {
         }
 
         if (!assignedRoleId && effectiveOrgId) {
-          const existingRole = await prisma.role.findFirst({
-            where: { organizationId: effectiveOrgId },
-            orderBy: { createdAt: "asc" },
+          // Look for dedicated EMPLOYEE or Staff role for this organization
+          let empRole = await prisma.role.findFirst({
+            where: {
+              organizationId: effectiveOrgId,
+              name: { in: ["EMPLOYEE", "Employee", "Staff", "STAFF"] },
+            },
           });
-          if (existingRole) {
-            assignedRoleId = existingRole.id;
+
+          // Fallback to global/unscoped EMPLOYEE role if org-scoped not found
+          if (!empRole) {
+            empRole = await prisma.role.findFirst({
+              where: {
+                name: { in: ["EMPLOYEE", "Employee", "Staff", "STAFF"] },
+              },
+            });
+          }
+
+          // If still not found, create a standard EMPLOYEE role for this organization
+          if (!empRole) {
+            try {
+              empRole = await prisma.role.create({
+                data: {
+                  name: "EMPLOYEE",
+                  description: "Standard employee role",
+                  organizationId: effectiveOrgId,
+                },
+              });
+            } catch (_) {
+              empRole = await prisma.role.findFirst({
+                where: {
+                  organizationId: effectiveOrgId,
+                  name: "EMPLOYEE",
+                },
+              });
+            }
+          }
+
+          if (empRole) {
+            assignedRoleId = empRole.id;
           }
         }
 

@@ -9382,17 +9382,35 @@ async function syncDatabase() {
         await prisma.employee.deleteMany({
           where: {
             OR: [
-              { email: { in: ["info@symbosys.com", "info@symbosys2.com", "info@technova.com"] } },
-              { id: { in: ["EMP001", "EMP003", "EMP004", "EMP005"] } },
+              { email: { in: ["info@symbosys.com", "info@symbosys2.com", "info@technova.com", "platform@hrms.com", "admin@hrms.com"] } },
               { name: { startsWith: "Admin -" } },
-              { user: { role: { name: { in: ["SUPER_ADMIN", "Organization Admin", "ADMIN"] } } } },
               { userId: infoUser.id }
             ]
           }
         });
-        console.log("[DB Sync] Verified: Organization Admins cleaned from employees table.");
+        console.log("[DB Sync] Verified: Root Organization Admins cleaned from employees table.");
       } catch (cleanErr) {
         console.warn("[DB Sync] Notice cleaning admin from employees:", cleanErr.message);
+      }
+      try {
+        const allOrgs = await prisma.organization.findMany();
+        for (const org of allOrgs) {
+          const existingEmpRole = await prisma.role.findFirst({
+            where: { organizationId: org.id, name: { in: ["EMPLOYEE", "Employee"] } }
+          });
+          if (!existingEmpRole) {
+            await prisma.role.create({
+              data: {
+                name: "EMPLOYEE",
+                description: `Standard Employee role for ${org.name}`,
+                organizationId: org.id
+              }
+            });
+            console.log(`[DB Sync] Created default EMPLOYEE role for org ${org.name}`);
+          }
+        }
+      } catch (roleSyncErr) {
+        console.warn("[DB Sync] Notice checking org roles:", roleSyncErr.message);
       }
     }
     await seedPermissions();
@@ -12780,9 +12798,8 @@ var EmployeeRepository = class {
       ];
     }
     whereClause.NOT = [
-      { user: { role: { name: { in: ["SUPER_ADMIN", "Organization Admin", "ORGANIZATION ADMIN", "Super Admin", "ADMIN"] } } } },
       { name: { startsWith: "Admin -" } },
-      { email: { in: ["info@symbosys.com", "info@symbosys2.com", "info@technova.com"] } }
+      { email: { in: ["info@symbosys.com", "info@symbosys2.com", "info@technova.com", "platform@hrms.com", "admin@hrms.com"] } }
     ];
     return prisma.employee.findMany({
       where: whereClause,
@@ -13035,12 +13052,39 @@ var EmployeeService = class {
           }
         }
         if (!assignedRoleId && effectiveOrgId) {
-          const existingRole = await prisma.role.findFirst({
-            where: { organizationId: effectiveOrgId },
-            orderBy: { createdAt: "asc" }
+          let empRole = await prisma.role.findFirst({
+            where: {
+              organizationId: effectiveOrgId,
+              name: { in: ["EMPLOYEE", "Employee", "Staff", "STAFF"] }
+            }
           });
-          if (existingRole) {
-            assignedRoleId = existingRole.id;
+          if (!empRole) {
+            empRole = await prisma.role.findFirst({
+              where: {
+                name: { in: ["EMPLOYEE", "Employee", "Staff", "STAFF"] }
+              }
+            });
+          }
+          if (!empRole) {
+            try {
+              empRole = await prisma.role.create({
+                data: {
+                  name: "EMPLOYEE",
+                  description: "Standard employee role",
+                  organizationId: effectiveOrgId
+                }
+              });
+            } catch (_) {
+              empRole = await prisma.role.findFirst({
+                where: {
+                  organizationId: effectiveOrgId,
+                  name: "EMPLOYEE"
+                }
+              });
+            }
+          }
+          if (empRole) {
+            assignedRoleId = empRole.id;
           }
         }
         let targetUser = null;
@@ -15714,6 +15758,14 @@ var OrganizationRepository = class {
         permissions: {
           connect: allPermissions.map((p) => ({ id: p.id }))
         }
+      }
+    });
+    await prisma.role.create({
+      data: {
+        name: "EMPLOYEE",
+        description: `Standard Employee role for ${orgData.name}`,
+        isSystem: false,
+        organizationId: organization.id
       }
     });
     const user = await prisma.user.create({
@@ -18945,22 +18997,7 @@ var linkOrCreateEmployeeForUser = async (user, organizationId) => {
     }
   }
   const roleUpper = String(roleName || "").toUpperCase();
-  const isAdminOrOrg = roleUpper === "SUPER_ADMIN" || roleUpper === "ORGANIZATION ADMIN" || roleUpper === "ADMIN" || roleUpper === "SUPER ADMIN" || roleUpper === "HR_ADMIN" || user.name && user.name.startsWith("Admin -") || user.email === "info@symbosys.com";
-  if (isAdminOrOrg) {
-    try {
-      await prisma.employee.deleteMany({
-        where: {
-          OR: [
-            { userId: user.id },
-            ...user.email ? [{ email: { equals: user.email, mode: "insensitive" } }] : []
-          ]
-        }
-      });
-    } catch (e) {
-      console.warn("[Auth] Notice cleaning admin from employee records:", e.message);
-    }
-    return null;
-  }
+  const isRootPlatformOrOrgAdmin = user.name && user.name.startsWith("Admin -") || user.email === "info@symbosys.com" || user.email === "platform@hrms.com" || user.email === "admin@hrms.com";
   let employee = null;
   try {
     employee = await prisma.employee.findUnique({
@@ -18968,6 +19005,9 @@ var linkOrCreateEmployeeForUser = async (user, organizationId) => {
     });
   } catch (err) {
     console.warn(`[Auth Controller] Error finding employee by userId:`, err.message || err);
+  }
+  if (isRootPlatformOrOrgAdmin && !employee) {
+    return null;
   }
   if (!employee) {
     if (user.email) {

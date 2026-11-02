@@ -1843,23 +1843,42 @@ export async function syncDatabase() {
         console.log("[DB Sync] Successfully promoted info@symbosys.com to SUPER_ADMIN.");
       }
 
-      // Ensure Organization Admins are NOT in the employees table
-      // (Admins belong to users and memberships tables, not operational staff)
+      // Ensure root platform / system organization admin is not duplicate in employees table
       try {
         await prisma.employee.deleteMany({
           where: {
             OR: [
-              { email: { in: ["info@symbosys.com", "info@symbosys2.com", "info@technova.com"] } },
-              { id: { in: ["EMP001", "EMP003", "EMP004", "EMP005"] } },
+              { email: { in: ["info@symbosys.com", "info@symbosys2.com", "info@technova.com", "platform@hrms.com", "admin@hrms.com"] } },
               { name: { startsWith: "Admin -" } },
-              { user: { role: { name: { in: ["SUPER_ADMIN", "Organization Admin", "ADMIN"] } } } },
               { userId: infoUser.id },
             ],
           },
         });
-        console.log("[DB Sync] Verified: Organization Admins cleaned from employees table.");
+        console.log("[DB Sync] Verified: Root Organization Admins cleaned from employees table.");
       } catch (cleanErr: any) {
         console.warn("[DB Sync] Notice cleaning admin from employees:", cleanErr.message);
+      }
+
+      // Ensure default EMPLOYEE role exists for all organizations
+      try {
+        const allOrgs = await prisma.organization.findMany();
+        for (const org of allOrgs) {
+          const existingEmpRole = await prisma.role.findFirst({
+            where: { organizationId: org.id, name: { in: ["EMPLOYEE", "Employee"] } },
+          });
+          if (!existingEmpRole) {
+            await prisma.role.create({
+              data: {
+                name: "EMPLOYEE",
+                description: `Standard Employee role for ${org.name}`,
+                organizationId: org.id,
+              },
+            });
+            console.log(`[DB Sync] Created default EMPLOYEE role for org ${org.name}`);
+          }
+        }
+      } catch (roleSyncErr: any) {
+        console.warn("[DB Sync] Notice checking org roles:", roleSyncErr.message);
       }
 
 

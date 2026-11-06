@@ -12721,24 +12721,48 @@ var uploadAvatar = asyncHandler(async (req, res, next) => {
   const shouldUpdateSelf = req.query?.updateSelf === "true" || req.body?.updateSelf === "true" || req.body?.updateSelf === true;
   if (shouldUpdateSelf && req.user) {
     try {
+      const isOrgAdmin = req.user.name && req.user.name.startsWith("Admin -") || req.user.email === "info@symbosys.com" || req.user.email === "platform@hrms.com" || req.user.email === "admin@hrms.com" || req.user.role?.name === "SUPER_ADMIN" || req.user.role?.name === "SUPER ADMIN" || req.user.role?.name === "ORGANIZATION_ADMIN";
+      let orgId = req.user.organizationId;
+      if (!orgId) {
+        const membership = await prisma.membership.findFirst({
+          where: { userId: req.user.id }
+        });
+        orgId = membership?.organizationId;
+      }
+      if (!orgId && isOrgAdmin) {
+        const firstOrg = await prisma.organization.findFirst();
+        orgId = firstOrg?.id;
+      }
+      if (orgId && (isOrgAdmin || req.query?.isOrg === "true" || req.body?.isOrg === true)) {
+        await prisma.organization.update({
+          where: { id: orgId },
+          data: { logoUrl: avatarUrl }
+        });
+      }
       const conditions = [];
       if (req.user.id) conditions.push({ userId: req.user.id });
       if (req.user.email) conditions.push({ email: req.user.email });
       if (req.user.phone) conditions.push({ phone: req.user.phone });
       if (conditions.length > 0) {
-        await prisma.employee.updateMany({
+        const updateResult = await prisma.employee.updateMany({
           where: { OR: conditions },
           data: { avatar: avatarUrl }
         });
+        if (updateResult.count === 0 && orgId) {
+          await prisma.organization.update({
+            where: { id: orgId },
+            data: { logoUrl: avatarUrl }
+          });
+        }
       }
     } catch (err) {
-      console.error("[UploadAvatar] Failed to update employee avatar in DB:", err);
+      console.error("[UploadAvatar] Failed to update avatar in DB:", err);
     }
   }
   return SuccessResponse(
     res,
     "Avatar uploaded successfully to Cloudinary",
-    { url: avatarUrl, public_id: result.public_id },
+    { url: avatarUrl, public_id: result.public_id, organizationLogo: avatarUrl },
     200 /* OK */
   );
 });
@@ -19474,6 +19498,18 @@ var login = asyncHandler(async (req, res, next) => {
   const organizationId = membership.organizationId;
   const orgRole = membership.role || user.role;
   const employee = await linkOrCreateEmployeeForUser(user, organizationId);
+  let organizationLogo = null;
+  if (organizationId) {
+    try {
+      const org = await prisma.organization.findUnique({
+        where: { id: organizationId },
+        select: { logoUrl: true }
+      });
+      organizationLogo = org?.logoUrl || null;
+    } catch (_) {
+    }
+  }
+  const avatarUrl = employee?.avatar || organizationLogo || null;
   const jwtSecret = env_config_default.jwt.secret || "123456";
   const token = signToken(
     { id: user.id, phoneNumber: user.phone, email: user.email, organizationId },
@@ -19490,7 +19526,9 @@ var login = asyncHandler(async (req, res, next) => {
         name: employee?.name || user.name,
         email: employee?.email || user.email,
         phone: user.phone,
-        avatar: employee?.avatar || null,
+        avatar: avatarUrl,
+        image: avatarUrl,
+        organizationLogo,
         role: orgRole?.name || "EMPLOYEE",
         permissions: orgRole?.permissions?.map((p) => p.name) || [],
         organizationId
@@ -19515,7 +19553,19 @@ var getProfile = asyncHandler(async (req, res, next) => {
       where: { OR: conditions }
     });
   }
-  const avatarUrl = employee?.avatar || null;
+  let organizationLogo = null;
+  const targetOrgId = req.user.organizationId || employee?.organizationId;
+  if (targetOrgId) {
+    try {
+      const org = await prisma.organization.findUnique({
+        where: { id: targetOrgId },
+        select: { logoUrl: true }
+      });
+      organizationLogo = org?.logoUrl || null;
+    } catch (_) {
+    }
+  }
+  const avatarUrl = employee?.avatar || organizationLogo || null;
   const orgRole = req.user.role;
   return SuccessResponse(
     res,
@@ -19529,6 +19579,7 @@ var getProfile = asyncHandler(async (req, res, next) => {
         phone: req.user.phone,
         avatar: avatarUrl,
         image: avatarUrl,
+        organizationLogo,
         designation: employee?.designation || employee?.role || null,
         role: orgRole?.name || "EMPLOYEE",
         permissions: orgRole?.permissions?.map((p) => p.name) || [],

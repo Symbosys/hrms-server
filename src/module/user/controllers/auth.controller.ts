@@ -355,7 +355,7 @@ export const verifyOtp = asyncHandler(async (req: Request, res: Response, next: 
         email: employee?.email || user.email,
         phone: user.phone,
         avatar: employee?.avatar || null,
-        designation: employee?.designation || employee?.role || null,
+        designation: employee?.designation || (employee as any)?.role || null,
         role: orgRole?.name || "EMPLOYEE",
         permissions: orgRole?.permissions?.map((p: any) => p.name) || [],
         organizationId,
@@ -645,6 +645,20 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
   // Link or create the employee record for this user
   const employee = await linkOrCreateEmployeeForUser(user, organizationId);
 
+  // Fetch organization logo if available
+  let organizationLogo: string | null = null;
+  if (organizationId) {
+    try {
+      const org = await prisma.organization.findUnique({
+        where: { id: organizationId },
+        select: { logoUrl: true }
+      });
+      organizationLogo = org?.logoUrl || null;
+    } catch (_) {}
+  }
+
+  const avatarUrl = employee?.avatar || organizationLogo || null;
+
   // Sign JWT token — include organizationId
   const jwtSecret = env.jwt.secret || "123456";
   const token = signToken(
@@ -664,7 +678,9 @@ export const login = asyncHandler(async (req: Request, res: Response, next: Next
         name: employee?.name || user.name,
         email: employee?.email || user.email,
         phone: user.phone,
-        avatar: employee?.avatar || null,
+        avatar: avatarUrl,
+        image: avatarUrl,
+        organizationLogo: organizationLogo,
         role: orgRole?.name || "EMPLOYEE",
         permissions: orgRole?.permissions?.map((p: any) => p.name) || [],
         organizationId,
@@ -705,7 +721,20 @@ export const getProfile = asyncHandler(async (req: AuthenticatedRequest, res: Re
     });
   }
 
-  const avatarUrl = employee?.avatar || null;
+  // Fetch organization logo if available
+  let organizationLogo: string | null = null;
+  const targetOrgId = req.user.organizationId || employee?.organizationId;
+  if (targetOrgId) {
+    try {
+      const org = await prisma.organization.findUnique({
+        where: { id: targetOrgId },
+        select: { logoUrl: true }
+      });
+      organizationLogo = org?.logoUrl || null;
+    } catch (_) {}
+  }
+
+  const avatarUrl = employee?.avatar || organizationLogo || null;
 
   // Get org-scoped role (already resolved in middleware)
   const orgRole = req.user.role;
@@ -722,7 +751,8 @@ export const getProfile = asyncHandler(async (req: AuthenticatedRequest, res: Re
         phone: req.user.phone,
         avatar: avatarUrl,
         image: avatarUrl,
-        designation: employee?.designation || employee?.role || null,
+        organizationLogo: organizationLogo,
+        designation: employee?.designation || (employee as any)?.role || null,
         role: orgRole?.name || "EMPLOYEE",
         permissions: orgRole?.permissions?.map((p: any) => p.name) || [],
         organizationId: req.user.organizationId,

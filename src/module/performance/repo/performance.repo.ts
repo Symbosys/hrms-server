@@ -33,6 +33,12 @@ export class PerformanceRepository {
     });
   }
 
+  static async deleteGoal(id: string) {
+    return prisma.performanceGoal.delete({
+      where: { id },
+    });
+  }
+
   // 360 Feedback
   static async findFeedbacks(employeeId?: string, organizationId?: string) {
     const where: any = {};

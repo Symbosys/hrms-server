@@ -17632,6 +17632,11 @@ var PerformanceRepository = class {
       data
     });
   }
+  static async deleteGoal(id) {
+    return prisma.performanceGoal.delete({
+      where: { id }
+    });
+  }
   // 360 Feedback
   static async findFeedbacks(employeeId, organizationId) {
     const where = {};
@@ -17716,42 +17721,17 @@ var PerformanceRepository = class {
 var PerformanceService = class {
   // Goals & KRAs
   static async getGoals(employeeId, organizationId) {
-    let goals = await PerformanceRepository.findGoals(employeeId, organizationId);
-    if (goals.length === 0 && employeeId) {
-      const employee = await prisma.employee.findUnique({ where: { id: employeeId } });
-      if (employee) {
-        const empOrgId = organizationId || employee.organizationId || null;
-        await PerformanceRepository.createGoal({
-          employeeId,
-          title: "Deliver Redesigned Core UI Components",
-          weight: "40%",
-          kra: "Development Quality",
-          progress: 85,
-          status: "In Progress",
-          organizationId: empOrgId
-        });
-        await PerformanceRepository.createGoal({
-          employeeId,
-          title: "Optimize Web Performance & Core Web Vitals",
-          weight: "30%",
-          kra: "System Efficiency",
-          progress: 95,
-          status: "Completed",
-          organizationId: empOrgId
-        });
-        await PerformanceRepository.createGoal({
-          employeeId,
-          title: "Refactor State Management & Context Architecture",
-          weight: "30%",
-          kra: "Refactoring & Tech Debt",
-          progress: 60,
-          status: "In Progress",
-          organizationId: empOrgId
-        });
-        goals = await PerformanceRepository.findGoals(employeeId, organizationId);
-      }
-    }
-    return goals;
+    const goals = await PerformanceRepository.findGoals(employeeId, organizationId);
+    const staticTitles = [
+      "Deliver Redesigned Core UI Components",
+      "Optimize Web Performance & Core Web Vitals",
+      "Refactor State Management & Context Architecture"
+    ];
+    prisma.performanceGoal.deleteMany({
+      where: { title: { in: staticTitles } }
+    }).catch(() => {
+    });
+    return goals.filter((g) => !staticTitles.includes(g.title));
   }
   static async createGoal(data, organizationId) {
     const employee = await prisma.employee.findUnique({ where: { id: data.employeeId } });
@@ -17772,35 +17752,25 @@ var PerformanceService = class {
     const resolvedStatus = status || (progress === 100 ? "Completed" : "In Progress");
     return PerformanceRepository.updateGoal(id, { progress, status: resolvedStatus });
   }
+  static async deleteGoal(id) {
+    const goal = await PerformanceRepository.findGoalById(id);
+    if (!goal) {
+      throw new ErrorResponse("Goal not found", 404 /* Not_Found */);
+    }
+    return PerformanceRepository.deleteGoal(id);
+  }
   // 360 Feedback
   static async getFeedbacks(employeeId, organizationId) {
-    let feedbacks = await PerformanceRepository.findFeedbacks(employeeId, organizationId);
-    if (feedbacks.length === 0 && employeeId) {
-      const employee = await prisma.employee.findUnique({ where: { id: employeeId } });
-      if (employee) {
-        const empOrgId = organizationId || employee.organizationId || null;
-        await PerformanceRepository.createFeedback({
-          employeeId,
-          reviewer: "Neha Patel",
-          relation: "Manager",
-          rating: 4.5,
-          text: "Excellent technical skillset and outstanding dedication to the UI refactor work.",
-          date: /* @__PURE__ */ new Date("2026-06-28"),
-          organizationId: empOrgId
-        });
-        await PerformanceRepository.createFeedback({
-          employeeId,
-          reviewer: "Rohan Das",
-          relation: "Peer",
-          rating: 4.2,
-          text: "Great collaborator, very open to UX critiques and fast at implementing layouts.",
-          date: /* @__PURE__ */ new Date("2026-06-29"),
-          organizationId: empOrgId
-        });
-        feedbacks = await PerformanceRepository.findFeedbacks(employeeId, organizationId);
-      }
-    }
-    return feedbacks;
+    const feedbacks = await PerformanceRepository.findFeedbacks(employeeId, organizationId);
+    const staticTexts = [
+      "Excellent technical skillset and outstanding dedication to the UI refactor work.",
+      "Great collaborator, very open to UX critiques and fast at implementing layouts."
+    ];
+    prisma.performanceFeedback.deleteMany({
+      where: { text: { in: staticTexts } }
+    }).catch(() => {
+    });
+    return feedbacks.filter((f) => !staticTexts.includes(f.text));
   }
   static async createFeedback(data, organizationId) {
     const employee = await prisma.employee.findUnique({ where: { id: data.employeeId } });
@@ -17861,31 +17831,22 @@ var PerformanceService = class {
         targetEmployeeId = employee.id;
       }
     }
-    let ratings = await PerformanceRepository.findMonthlyRatings(targetEmployeeId, organizationId);
-    if (ratings.length === 0 && targetEmployeeId) {
-      const empWhere = {};
-      if (organizationId) empWhere.organizationId = organizationId;
-      const employee = await prisma.employee.findUnique({ where: { id: targetEmployeeId } }) || await prisma.employee.findFirst({ where: empWhere });
-      if (employee) {
-        const empOrgId = organizationId || employee.organizationId || null;
-        const empSeed = (employee.id || employee.name || "").split("").reduce((acc, char) => acc + char.charCodeAt(0), 0) % 5;
-        const seedData = [
-          { month: "July 2026", rating: Number((4.4 + empSeed * 0.1).toFixed(1)), status: "EXCEEDS EXPECTATIONS", tasks: "98%", quality: "4.7/5", teamwork: "4.6/5", feedback: `Outstanding performance in ${employee.designation || "Engineering"} deliverables.`, givenBy: "Super Admin" },
-          { month: "June 2026", rating: Number((4.3 + empSeed * 0.1).toFixed(1)), status: "EXCEEDS EXPECTATIONS", tasks: "95%", quality: "4.5/5", teamwork: "4.5/5", feedback: "Consistently delivered milestones on schedule with zero critical bugs.", givenBy: "Super Admin" },
-          { month: "May 2026", rating: Number((4.1 + empSeed * 0.1).toFixed(1)), status: "MEETS EXPECTATIONS", tasks: "91%", quality: "4.2/5", teamwork: "4.3/5", feedback: "Great effort on API optimization and unit test coverage.", givenBy: "Super Admin" },
-          { month: "April 2026", rating: Number((4.6 + empSeed * 0.05).toFixed(1)), status: "OUTSTANDING", tasks: "99%", quality: "4.9/5", teamwork: "4.8/5", feedback: "Recognized for initiative, mentoring, and technical excellence.", givenBy: "Super Admin" }
-        ];
-        for (const item of seedData) {
-          await PerformanceRepository.createMonthlyRating({
-            employeeId: employee.id,
-            organizationId: empOrgId,
-            ...item
-          });
-        }
-        ratings = await PerformanceRepository.findMonthlyRatings(employee.id, organizationId);
+    const staticFeedbackKeywords = [
+      "Consistently delivered milestones on schedule with zero critical bugs.",
+      "Great effort on API optimization and unit test coverage.",
+      "Recognized for initiative, mentoring, and technical excellence."
+    ];
+    prisma.performanceRating.deleteMany({
+      where: {
+        OR: [
+          { feedback: { in: staticFeedbackKeywords } },
+          { feedback: { startsWith: "Outstanding performance in " } }
+        ]
       }
-    }
-    return ratings;
+    }).catch(() => {
+    });
+    const ratings = await PerformanceRepository.findMonthlyRatings(targetEmployeeId, organizationId);
+    return ratings.filter((r) => !staticFeedbackKeywords.includes(r.feedback || "") && !r.feedback?.startsWith("Outstanding performance in "));
   }
   static async createMonthlyRating(data, organizationId) {
     let employee = await prisma.employee.findUnique({ where: { id: data.employeeId } });
@@ -18013,6 +17974,16 @@ var updateGoalProgress = asyncHandler(async (req, res, next) => {
     200 /* OK */
   );
 });
+var deleteGoal = asyncHandler(async (req, res) => {
+  const id = req.params.id;
+  await PerformanceService.deleteGoal(id);
+  return SuccessResponse(
+    res,
+    "Performance goal deleted successfully",
+    null,
+    200 /* OK */
+  );
+});
 var getFeedbacks = asyncHandler(async (req, res, next) => {
   const employeeId = req.query.employeeId;
   const feedbacks = await PerformanceService.getFeedbacks(employeeId, req.user?.organizationId);
@@ -18094,6 +18065,7 @@ router14.use(protect);
 router14.get("/goals", hasPermission("VIEW_KRA_GOALS", "VIEW_PERFORMANCE"), getGoals);
 router14.post("/goals", hasPermission("CREATE_KRA_GOALS", "CREATE_PERFORMANCE"), createGoal);
 router14.patch("/goals/:id/progress", hasPermission("UPDATE_KRA_GOALS", "UPDATE_PERFORMANCE"), updateGoalProgress);
+router14.delete("/goals/:id", hasPermission("DELETE_KRA_GOALS", "UPDATE_KRA_GOALS", "UPDATE_PERFORMANCE", "CREATE_KRA_GOALS"), deleteGoal);
 router14.get("/feedbacks", hasPermission("VIEW_FEEDBACK_360", "VIEW_PERFORMANCE"), getFeedbacks);
 router14.post("/feedbacks", hasPermission("CREATE_FEEDBACK_360", "CREATE_PERFORMANCE"), createFeedback);
 router14.get("/bellcurve", hasPermission("VIEW_BELLCURVE_ANALYTICS", "VIEW_PERFORMANCE"), getBellCurveDistribution);

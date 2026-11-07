@@ -4,6 +4,7 @@ import {
   getGoals,
   createGoal,
   updateGoalProgress,
+  deleteGoal,
   getFeedbacks,
   createFeedback,
   getBellCurveDistribution,
@@ -21,6 +22,7 @@ router.use(protect);
 router.get("/goals", hasPermission("VIEW_KRA_GOALS", "VIEW_PERFORMANCE"), getGoals);
 router.post("/goals", hasPermission("CREATE_KRA_GOALS", "CREATE_PERFORMANCE"), createGoal);
 router.patch("/goals/:id/progress", hasPermission("UPDATE_KRA_GOALS", "UPDATE_PERFORMANCE"), updateGoalProgress);
+router.delete("/goals/:id", hasPermission("DELETE_KRA_GOALS", "UPDATE_KRA_GOALS", "UPDATE_PERFORMANCE", "CREATE_KRA_GOALS"), deleteGoal);
 
 // 2. Feedback Routes
 router.get("/feedbacks", hasPermission("VIEW_FEEDBACK_360", "VIEW_PERFORMANCE"), getFeedbacks);

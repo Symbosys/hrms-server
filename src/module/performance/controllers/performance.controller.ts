@@ -58,6 +58,18 @@ export const updateGoalProgress = asyncHandler(async (req: AuthenticatedRequest,
   );
 });
 
+export const deleteGoal = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const id = req.params.id as string;
+  await PerformanceService.deleteGoal(id);
+
+  return SuccessResponse(
+    res,
+    "Performance goal deleted successfully",
+    null,
+    statusCode.OK
+  );
+});
+
 // 360 Feedback
 export const getFeedbacks = asyncHandler(async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   const employeeId = req.query.employeeId as string | undefined;

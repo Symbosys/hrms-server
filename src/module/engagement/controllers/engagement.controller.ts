@@ -11,6 +11,7 @@ import {
   submitReactionSchema,
   submitMoodSchema,
   submitSurveyResponseSchema,
+  createSurveySchema,
 } from "../validators/engagement.validator.ts";
 
 // Posts & Comments
@@ -39,6 +40,21 @@ export const createPost = asyncHandler(async (req: AuthenticatedRequest, res: Re
     "Post published on company feed successfully",
     post,
     statusCode.Created
+  );
+});
+
+export const deletePost = asyncHandler(async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  const postId = req.params.id || req.body?.id || req.body?.postId || (req.query.id as string);
+  if (!postId) {
+    return next(new ErrorResponse("Post ID is required", statusCode.Bad_Request));
+  }
+  await EngagementService.deletePost(postId);
+
+  return SuccessResponse(
+    res,
+    "Post removed from feed successfully",
+    null,
+    statusCode.OK
   );
 });
 
@@ -155,6 +171,40 @@ export const submitSurveyResponse = asyncHandler(async (req: AuthenticatedReques
     res,
     "Survey feedback response saved successfully",
     response,
+    statusCode.OK
+  );
+});
+
+export const createSurvey = asyncHandler(async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  const parsed = createSurveySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return next(parsed.error);
+  }
+
+  const survey = await EngagementService.createSurvey(
+    parsed.data,
+    req.user?.organizationId
+  );
+
+  return SuccessResponse(
+    res,
+    "Corporate pulse survey created successfully",
+    survey,
+    statusCode.Created
+  );
+});
+
+export const deleteSurvey = asyncHandler(async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  const surveyId = req.params.id || req.body?.id || req.body?.surveyId || (req.query.id as string);
+  if (!surveyId) {
+    return next(new ErrorResponse("Survey ID is required", statusCode.Bad_Request));
+  }
+  await EngagementService.deleteSurvey(surveyId);
+
+  return SuccessResponse(
+    res,
+    "Corporate survey removed successfully",
+    null,
     statusCode.OK
   );
 });

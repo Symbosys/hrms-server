@@ -38,3 +38,9 @@ export const submitSurveyResponseSchema = z.object({
   employeeId: z.string({ message: "Employee ID is required" }),
   rating: z.number().int().min(1).max(5),
 });
+
+export const createSurveySchema = z.object({
+  title: z.string({ message: "Survey title is required" }).min(1),
+  question: z.string({ message: "Survey question is required" }).min(1),
+  closesAt: z.union([z.string(), z.date()]).transform((val) => new Date(val)),
+});

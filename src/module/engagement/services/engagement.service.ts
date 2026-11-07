@@ -6,42 +6,7 @@ import { prisma } from "../../../db/prisma.ts";
 export class EngagementService {
   // Feed Announcements
   static async getPosts(employeeId?: string, organizationId?: string) {
-    let posts = await EngagementRepository.findPosts(employeeId, organizationId);
-
-    // Auto-seed default posts if empty for this organization
-    if (posts.length === 0 && organizationId) {
-      const employee = await prisma.employee.findFirst({
-        where: { organizationId }
-      });
-      const authorName = employee ? employee.name : "HR Department";
-      const authorRole = employee ? (employee.designation || "HR Lead") : "HR Manager";
-
-      const post1 = await EngagementRepository.createPost({
-        authorName,
-        authorRole,
-        authorAvatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop",
-        content: "Welcome to our company portal! Let's collaborate and achieve great milestones together.",
-        organizationId,
-      });
-
-      const post2 = await EngagementRepository.createPost({
-        authorName: "System Administrator",
-        authorRole: "Corporate Operations",
-        authorAvatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop",
-        content: "Announcing the WFH Hybrid Policy Review 2026. Please share your feedback in the Surveys tab.",
-        organizationId,
-      });
-
-      await EngagementRepository.addComment({
-        postId: post1.id,
-        userName: "Team Member",
-        text: "Excited to be part of the team!",
-      });
-
-      posts = await EngagementRepository.findPosts(employeeId, organizationId);
-    }
-
-    return posts;
+    return EngagementRepository.findPosts(employeeId, organizationId);
   }
 
   static async createPost(
@@ -52,6 +17,14 @@ export class EngagementService {
       ...data,
       organizationId: organizationId || null,
     });
+  }
+
+  static async deletePost(postId: string) {
+    const post = await prisma.engagementPost.findUnique({ where: { id: postId } });
+    if (!post) {
+      throw new ErrorResponse("Post not found", statusCode.Not_Found);
+    }
+    return EngagementRepository.deletePost(postId);
   }
 
   static async addComment(data: { postId: string; userName: string; text: string }) {
@@ -101,24 +74,25 @@ export class EngagementService {
 
   // Surveys
   static async getSurveys(employeeId?: string, organizationId?: string) {
-    let surveys = await EngagementRepository.findSurveys(employeeId, organizationId);
+    return EngagementRepository.findSurveys(employeeId, organizationId);
+  }
 
-    // Auto-seed default hybrid pulse survey if database is empty for this organization
-    if (surveys.length === 0 && organizationId) {
-      const closesAt = new Date();
-      closesAt.setDate(closesAt.getDate() + 7); // Closes in 7 days
+  static async createSurvey(
+    data: { title: string; question: string; closesAt: Date },
+    organizationId?: string
+  ) {
+    return EngagementRepository.createSurvey({
+      ...data,
+      organizationId: organizationId || null,
+    });
+  }
 
-      await EngagementRepository.createSurvey({
-        title: "WFH Hybrid Policy Review 2026",
-        question: "How satisfied are you with our current work environment?",
-        closesAt,
-        organizationId,
-      });
-
-      surveys = await EngagementRepository.findSurveys(employeeId, organizationId);
+  static async deleteSurvey(surveyId: string) {
+    const survey = await prisma.corporateSurvey.findUnique({ where: { id: surveyId } });
+    if (!survey) {
+      throw new ErrorResponse("Survey not found", statusCode.Not_Found);
     }
-
-    return surveys;
+    return EngagementRepository.deleteSurvey(surveyId);
   }
 
   static async submitSurveyResponse(surveyId: string, employeeId: string, rating: number) {

@@ -3,6 +3,22 @@ import { prisma } from "../../../db/prisma.ts";
 export class EngagementRepository {
   // Feed Announcements
   static async findPosts(employeeId?: string, organizationId?: string) {
+    // Purge any previously auto-seeded static/dummy posts
+    try {
+      await prisma.engagementPost.deleteMany({
+        where: {
+          content: {
+            in: [
+              "Welcome to our company portal! Let's collaborate and achieve great milestones together.",
+              "Announcing the WFH Hybrid Policy Review 2026. Please share your feedback in the Surveys tab."
+            ]
+          }
+        }
+      });
+    } catch {
+      // Ignore if already deleted
+    }
+
     const where: any = {};
     if (organizationId) {
       where.organizationId = organizationId;
@@ -40,7 +56,7 @@ export class EngagementRepository {
         id: post.id,
         author: post.authorName,
         authorRole: post.authorRole,
-        authorAvatar: post.authorAvatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop",
+        authorAvatar: post.authorAvatar || null,
         content: post.content,
         image: post.image,
         likes: post.likesCount,
@@ -61,6 +77,12 @@ export class EngagementRepository {
   static async createPost(data: any) {
     return prisma.engagementPost.create({
       data,
+    });
+  }
+
+  static async deletePost(id: string) {
+    return prisma.engagementPost.delete({
+      where: { id },
     });
   }
 
@@ -159,21 +181,40 @@ export class EngagementRepository {
       }
     });
 
-    const thrilledPct = total > 0 ? Math.round(((counts.THRILLED || 0) / total) * 100) : 52;
-    const contentPct = total > 0 ? Math.round(((counts.CONTENT || 0) / total) * 100) : 32;
-    const neutralPct = total > 0 ? Math.round(((counts.NEUTRAL || 0) / total) * 100) : 12;
-    const stressedPct = total > 0 ? Math.round(((counts.STRESSED || 0) / total) * 100) : 4;
+    const thrilledPct = total > 0 ? Math.round(((counts.THRILLED || 0) / total) * 100) : 0;
+    const contentPct = total > 0 ? Math.round(((counts.CONTENT || 0) / total) * 100) : 0;
+    const neutralPct = total > 0 ? Math.round(((counts.NEUTRAL || 0) / total) * 100) : 0;
+    const stressedPct = total > 0 ? Math.round(((counts.STRESSED || 0) / total) * 100) : 0;
 
     return {
       thrilled: thrilledPct,
       content: contentPct,
       neutral: neutralPct,
       stressed: stressedPct,
+      totalResponses: total,
     };
   }
 
   // Surveys
   static async findSurveys(employeeId?: string, organizationId?: string) {
+    // Purge any previously auto-seeded static/dummy surveys
+    try {
+      await prisma.corporateSurvey.deleteMany({
+        where: {
+          title: {
+            in: [
+              "WFH Hybrid Policy Review 2026",
+              "Q3 Work-Life Balance & Remote Policy Pulse",
+              "Office Cafeteria & Wellness Amenities Survey",
+              "Q2 Engineering Tooling & DevOps Infrastructure"
+            ]
+          }
+        }
+      });
+    } catch {
+      // Ignore if already deleted
+    }
+
     const where: any = {};
     if (organizationId) {
       where.organizationId = organizationId;
@@ -221,6 +262,12 @@ export class EngagementRepository {
   static async createSurvey(data: { title: string; question: string; closesAt: Date; organizationId?: string | null }) {
     return prisma.corporateSurvey.create({
       data,
+    });
+  }
+
+  static async deleteSurvey(id: string) {
+    return prisma.corporateSurvey.delete({
+      where: { id },
     });
   }
 }

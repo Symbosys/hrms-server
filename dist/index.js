@@ -9749,7 +9749,7 @@ var verifyToken = (token, secret) => {
 };
 
 // src/utils/response.util.ts
-var ErrorResponse = class extends Error {
+var ErrorResponse2 = class extends Error {
   constructor(message, statusCode2) {
     super(message);
     this.message = message;
@@ -9811,7 +9811,7 @@ var protect = asyncHandler(async (req, res, next) => {
   }
   if (!token) {
     console.warn("[Auth Middleware] No token found in cookies or authorization headers.");
-    return next(new ErrorResponse("Not authorized to access this route", 401));
+    return next(new ErrorResponse2("Not authorized to access this route", 401));
   }
   try {
     const jwtSecret = env_config_default.jwt.secret || "123456";
@@ -9828,7 +9828,7 @@ var protect = asyncHandler(async (req, res, next) => {
     }
     if (!decoded.phoneNumber && !decoded.id) {
       console.warn("[Auth Middleware] Token does not contain an id or phone number.");
-      return next(new ErrorResponse("Not authorized to access this route", 401));
+      return next(new ErrorResponse2("Not authorized to access this route", 401));
     }
     let user = null;
     if (decoded.id) {
@@ -9899,7 +9899,7 @@ var protect = asyncHandler(async (req, res, next) => {
         }
       }
       console.warn(`[Auth Middleware] User with ID ${decoded.id || "N/A"} or phone ${decoded.phoneNumber || "N/A"} not found in database.`);
-      return next(new ErrorResponse("User not found", 404));
+      return next(new ErrorResponse2("User not found", 404));
     }
     const activeMembership = user.memberships?.find((m) => m.status === "ACTIVE") || user.memberships?.[0];
     const primaryOrganizationId = activeMembership?.organizationId;
@@ -9913,13 +9913,13 @@ var protect = asyncHandler(async (req, res, next) => {
     next();
   } catch (error) {
     console.error("JWT Verification failed:", error.message || error);
-    return next(new ErrorResponse("Not authorized to access this route", 401));
+    return next(new ErrorResponse2("Not authorized to access this route", 401));
   }
 });
 var restrictTo = (...roles) => {
   return (req, res, next) => {
     if (!req.user) {
-      return next(new ErrorResponse("Not authorized to access this route", 401));
+      return next(new ErrorResponse2("Not authorized to access this route", 401));
     }
     if (req.user.isPlatformAdmin) {
       return next();
@@ -9929,7 +9929,7 @@ var restrictTo = (...roles) => {
       return next();
     }
     if (!userRoleName || !roles.includes(userRoleName)) {
-      return next(new ErrorResponse("You do not have permission to perform this action", 403));
+      return next(new ErrorResponse2("You do not have permission to perform this action", 403));
     }
     next();
   };
@@ -9937,7 +9937,7 @@ var restrictTo = (...roles) => {
 var hasPermission = (...requiredPermissions) => {
   return (req, res, next) => {
     if (!req.user) {
-      return next(new ErrorResponse("Not authorized to access this route", 401));
+      return next(new ErrorResponse2("Not authorized to access this route", 401));
     }
     if (req.user.isPlatformAdmin || req.user.role?.name === "SUPER_ADMIN") {
       return next();
@@ -9945,7 +9945,7 @@ var hasPermission = (...requiredPermissions) => {
     const userPermissions = req.user.role?.permissions?.map((p) => typeof p === "string" ? p : p.name) || [];
     const hasAnyPermission = requiredPermissions.some((perm) => userPermissions.includes(perm));
     if (!hasAnyPermission) {
-      return next(new ErrorResponse("You do not have permission to perform this action", 403));
+      return next(new ErrorResponse2("You do not have permission to perform this action", 403));
     }
     next();
   };
@@ -10140,7 +10140,7 @@ var RoleService = class {
   static async createPermission(data) {
     const existingPermission = await RoleRepository.findPermissionByName(data.name);
     if (existingPermission) {
-      throw new ErrorResponse("Permission with this name already exists", 409 /* Conflict */);
+      throw new ErrorResponse2("Permission with this name already exists", 409 /* Conflict */);
     }
     return RoleRepository.createPermission(data);
   }
@@ -10150,16 +10150,16 @@ var RoleService = class {
   // Role Services — now org-scoped
   static async createRole(data, organizationId) {
     if (!organizationId) {
-      throw new ErrorResponse("Organization context is required to create a role", 400 /* Bad_Request */);
+      throw new ErrorResponse2("Organization context is required to create a role", 400 /* Bad_Request */);
     }
     const existingRole = await RoleRepository.findRoleByName(data.name, organizationId);
     if (existingRole) {
-      throw new ErrorResponse("Role with this name already exists in your organization", 409 /* Conflict */);
+      throw new ErrorResponse2("Role with this name already exists in your organization", 409 /* Conflict */);
     }
     const uniqueIds = Array.from(new Set(data.permissionIds || []));
     const dbPermissions = await RoleRepository.findPermissionsByIds(uniqueIds);
     if (dbPermissions.length !== uniqueIds.length) {
-      throw new ErrorResponse("One or more permission IDs are invalid", 400 /* Bad_Request */);
+      throw new ErrorResponse2("One or more permission IDs are invalid", 400 /* Bad_Request */);
     }
     return RoleRepository.createRole({
       ...data,
@@ -10168,32 +10168,32 @@ var RoleService = class {
   }
   static async getRoles(organizationId) {
     if (!organizationId) {
-      throw new ErrorResponse("Organization context is required to list roles", 400 /* Bad_Request */);
+      throw new ErrorResponse2("Organization context is required to list roles", 400 /* Bad_Request */);
     }
     return RoleRepository.findAllRoles(organizationId);
   }
   static async updateRole(id, data, organizationId) {
     const role = await RoleRepository.findRoleById(id, false);
     if (!role) {
-      throw new ErrorResponse("Role not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Role not found", 404 /* Not_Found */);
     }
     if (role.organizationId !== organizationId) {
-      throw new ErrorResponse("You do not have permission to modify this role", 403 /* Forbidden */);
+      throw new ErrorResponse2("You do not have permission to modify this role", 403 /* Forbidden */);
     }
     if (role.isSystem && data.name && data.name !== role.name) {
-      throw new ErrorResponse("System roles cannot be renamed", 403 /* Forbidden */);
+      throw new ErrorResponse2("System roles cannot be renamed", 403 /* Forbidden */);
     }
     if (data.name && data.name !== role.name) {
       const existingRole = await RoleRepository.findRoleByName(data.name, organizationId);
       if (existingRole) {
-        throw new ErrorResponse("Role name already in use in your organization", 409 /* Conflict */);
+        throw new ErrorResponse2("Role name already in use in your organization", 409 /* Conflict */);
       }
     }
     if (data.permissionIds) {
       const uniqueIds = Array.from(new Set(data.permissionIds));
       const dbPermissions = await RoleRepository.findPermissionsByIds(uniqueIds);
       if (dbPermissions.length !== uniqueIds.length) {
-        throw new ErrorResponse("One or more permission IDs are invalid", 400 /* Bad_Request */);
+        throw new ErrorResponse2("One or more permission IDs are invalid", 400 /* Bad_Request */);
       }
     }
     return RoleRepository.updateRole(id, data);
@@ -10201,20 +10201,20 @@ var RoleService = class {
   static async deleteRole(id, organizationId) {
     const role = await RoleRepository.findRoleById(id, false);
     if (!role) {
-      throw new ErrorResponse("Role not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Role not found", 404 /* Not_Found */);
     }
     if (role.organizationId !== organizationId) {
-      throw new ErrorResponse("You do not have permission to delete this role", 403 /* Forbidden */);
+      throw new ErrorResponse2("You do not have permission to delete this role", 403 /* Forbidden */);
     }
     if (role.isSystem) {
-      throw new ErrorResponse("System roles cannot be deleted", 403 /* Forbidden */);
+      throw new ErrorResponse2("System roles cannot be deleted", 403 /* Forbidden */);
     }
     return RoleRepository.deleteRole(id);
   }
   // User Assignment — verify both user and role belong to same org
   static async assignRoleToUser(userId, roleId, organizationId) {
     if (!organizationId) {
-      throw new ErrorResponse("Organization context is required to assign roles", 400 /* Bad_Request */);
+      throw new ErrorResponse2("Organization context is required to assign roles", 400 /* Bad_Request */);
     }
     let resolvedRole = null;
     let targetRoleId = roleId;
@@ -10225,11 +10225,11 @@ var RoleService = class {
       }
       if (resolvedRole) {
         if (resolvedRole.organizationId && resolvedRole.organizationId !== organizationId) {
-          throw new ErrorResponse("Role does not belong to your organization", 403 /* Forbidden */);
+          throw new ErrorResponse2("Role does not belong to your organization", 403 /* Forbidden */);
         }
         targetRoleId = resolvedRole.id;
       } else {
-        throw new ErrorResponse(`Role '${roleId}' not found in your organization context.`, 404 /* Not_Found */);
+        throw new ErrorResponse2(`Role '${roleId}' not found in your organization context.`, 404 /* Not_Found */);
       }
     }
     let user = await RoleRepository.findUserById(userId);
@@ -10268,7 +10268,7 @@ var RoleService = class {
         });
         return user;
       }
-      throw new ErrorResponse("User not found and no matching employee record could be resolved to auto-create user account.", 404 /* Not_Found */);
+      throw new ErrorResponse2("User not found and no matching employee record could be resolved to auto-create user account.", 404 /* Not_Found */);
     }
     const matchingEmployee = await prisma.employee.findFirst({
       where: {
@@ -10337,7 +10337,7 @@ var assignRoleSchema = z.object({
 var getOrganizationId = (req) => {
   const orgId = req.user?.organizationId || req.headers["x-organization-id"] || req.query.organizationId;
   if (!orgId) {
-    throw new ErrorResponse("Organization context not found. Please log in again.", 400 /* Bad_Request */);
+    throw new ErrorResponse2("Organization context not found. Please log in again.", 400 /* Bad_Request */);
   }
   return orgId;
 };
@@ -10560,10 +10560,10 @@ var AssetService = class {
   static async assignAsset(id, employeeId, organizationId) {
     const asset = await AssetRepository.findAssetById(id);
     if (!asset) {
-      throw new ErrorResponse("Asset not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Asset not found", 404 /* Not_Found */);
     }
     if (organizationId && asset.organizationId && asset.organizationId !== organizationId) {
-      throw new ErrorResponse("You do not have permission to modify assets belonging to another organization", 403 /* Forbidden */);
+      throw new ErrorResponse2("You do not have permission to modify assets belonging to another organization", 403 /* Forbidden */);
     }
     const status = employeeId ? "Assigned" : "In Stock";
     return AssetRepository.updateAssetAssignment(id, employeeId, status);
@@ -10973,7 +10973,7 @@ var AttendanceService = class {
       data.employeeId = userEmp.id;
     }
     if (!employee) {
-      throw new ErrorResponse("Employee not found in your organization context", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found in your organization context", 404 /* Not_Found */);
     }
     try {
       const days = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
@@ -10991,14 +10991,14 @@ var AttendanceService = class {
       if (roster) {
         const todayShiftCode = String(roster[todayDayKey] || "").trim().toUpperCase();
         if (todayShiftCode === "OFF" || todayShiftCode === "WEEK OFF" || todayShiftCode === "WEEKOFF" || todayShiftCode === "WO") {
-          throw new ErrorResponse(
+          throw new ErrorResponse2(
             `Punch restricted: Today is scheduled as your Week Off in your assigned shift roster.`,
             400 /* Bad_Request */
           );
         }
       }
     } catch (err) {
-      if (err instanceof ErrorResponse) throw err;
+      if (err instanceof ErrorResponse2) throw err;
     }
     const fences = await this.getGeofences(organizationId);
     const activeFences = fences.filter((f) => f.isActive);
@@ -11170,7 +11170,7 @@ var AttendanceService = class {
       data.employeeId = userEmp.id;
     }
     if (!employee) {
-      throw new ErrorResponse("Employee not found in your organization context", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found in your organization context", 404 /* Not_Found */);
     }
     const convertTo12Hour = (timeStr) => {
       const [h, m] = timeStr.split(":");
@@ -11191,14 +11191,14 @@ var AttendanceService = class {
   static async updateRegularization(id, status, organizationId) {
     const req = await AttendanceRepository.findRegularizationById(id);
     if (!req) {
-      throw new ErrorResponse("Regularization request not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Regularization request not found", 404 /* Not_Found */);
     }
     if (organizationId) {
       const emp = await prisma.employee.findFirst({
         where: { id: req.employeeId, organizationId }
       });
       if (!emp) {
-        throw new ErrorResponse("You do not have permission to modify this regularization request", 403 /* Forbidden */);
+        throw new ErrorResponse2("You do not have permission to modify this regularization request", 403 /* Forbidden */);
       }
     }
     return AttendanceRepository.updateRegularizationStatus(id, status);
@@ -12286,24 +12286,24 @@ var DepartmentService = class {
     }
     const existingName = await DepartmentRepository.findByName(cleanName, organizationId);
     if (existingName) {
-      throw new ErrorResponse(`Department with name "${cleanName}" already exists in this organization.`, 409 /* Conflict */);
+      throw new ErrorResponse2(`Department with name "${cleanName}" already exists in this organization.`, 409 /* Conflict */);
     }
     const existingCode = await DepartmentRepository.findByCode(cleanCode, organizationId);
     if (existingCode) {
-      throw new ErrorResponse(`Department code "${cleanCode}" already exists in this organization.`, 409 /* Conflict */);
+      throw new ErrorResponse2(`Department code "${cleanCode}" already exists in this organization.`, 409 /* Conflict */);
     }
     let resolvedManagerId = null;
     if (data.managerId) {
       const manager = await DepartmentRepository.findUserById(data.managerId);
       if (!manager) {
-        throw new ErrorResponse("Manager user not found", 404 /* Not_Found */);
+        throw new ErrorResponse2("Manager user not found", 404 /* Not_Found */);
       }
       resolvedManagerId = manager.id;
     }
     if (data.parentId) {
       const parent = await DepartmentRepository.findById(data.parentId);
       if (!parent) {
-        throw new ErrorResponse("Parent department not found", 404 /* Not_Found */);
+        throw new ErrorResponse2("Parent department not found", 404 /* Not_Found */);
       }
     }
     return DepartmentRepository.create({
@@ -12320,42 +12320,42 @@ var DepartmentService = class {
   static async getDepartmentById(id) {
     const department = await DepartmentRepository.findById(id);
     if (!department) {
-      throw new ErrorResponse("Department not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Department not found", 404 /* Not_Found */);
     }
     return department;
   }
   static async updateDepartment(id, data, organizationId) {
     const department = await DepartmentRepository.findById(id);
     if (!department) {
-      throw new ErrorResponse("Department not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Department not found", 404 /* Not_Found */);
     }
     if (data.name && data.name !== department.name) {
       const existingName = await DepartmentRepository.findByName(data.name, organizationId);
       if (existingName) {
-        throw new ErrorResponse("Department name already in use", 409 /* Conflict */);
+        throw new ErrorResponse2("Department name already in use", 409 /* Conflict */);
       }
     }
     if (data.code && data.code !== department.code) {
       const existingCode = await DepartmentRepository.findByCode(data.code, organizationId);
       if (existingCode) {
-        throw new ErrorResponse("Department code already in use", 409 /* Conflict */);
+        throw new ErrorResponse2("Department code already in use", 409 /* Conflict */);
       }
     }
     let resolvedManagerId = data.managerId;
     if (data.managerId) {
       const manager = await DepartmentRepository.findUserById(data.managerId);
       if (!manager) {
-        throw new ErrorResponse("Manager user not found", 404 /* Not_Found */);
+        throw new ErrorResponse2("Manager user not found", 404 /* Not_Found */);
       }
       resolvedManagerId = manager.id;
     }
     if (data.parentId) {
       if (data.parentId === id) {
-        throw new ErrorResponse("A department cannot be its own parent", 400 /* Bad_Request */);
+        throw new ErrorResponse2("A department cannot be its own parent", 400 /* Bad_Request */);
       }
       const parent = await DepartmentRepository.findById(data.parentId);
       if (!parent) {
-        throw new ErrorResponse("Parent department not found", 404 /* Not_Found */);
+        throw new ErrorResponse2("Parent department not found", 404 /* Not_Found */);
       }
     }
     return DepartmentRepository.update(id, {
@@ -12366,7 +12366,7 @@ var DepartmentService = class {
   static async deleteDepartment(id) {
     const department = await DepartmentRepository.findById(id);
     if (!department) {
-      throw new ErrorResponse("Department not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Department not found", 404 /* Not_Found */);
     }
     return DepartmentRepository.delete(id);
   }
@@ -12635,7 +12635,7 @@ var DocumentService = class {
       where: { id: data.employeeId }
     });
     if (!employee) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     const docOrgId = organizationId || employee.organizationId || null;
     let status = "Active";
@@ -12659,10 +12659,10 @@ var DocumentService = class {
   static async deleteDocument(id, organizationId) {
     const doc = await DocumentRepository.findDocumentById(id);
     if (!doc) {
-      throw new ErrorResponse("Document not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Document not found", 404 /* Not_Found */);
     }
     if (organizationId && doc.organizationId && doc.organizationId !== organizationId) {
-      throw new ErrorResponse("You do not have permission to delete documents belonging to another organization", 403 /* Forbidden */);
+      throw new ErrorResponse2("You do not have permission to delete documents belonging to another organization", 403 /* Forbidden */);
     }
     return DocumentRepository.deleteDocument(id);
   }
@@ -12715,7 +12715,7 @@ var uploadAvatar = asyncHandler(async (req, res, next) => {
   } else if (req.body?.image) {
     result = await uploadDataUriToCloudinary(req.body.image, "avatars");
   } else {
-    throw new ErrorResponse("No file or image payload provided", 400 /* Bad_Request */);
+    throw new ErrorResponse2("No file or image payload provided", 400 /* Bad_Request */);
   }
   const avatarUrl = result.secure_url || result.url;
   const shouldUpdateSelf = req.query?.updateSelf === "true" || req.body?.updateSelf === "true" || req.body?.updateSelf === true;
@@ -13037,11 +13037,11 @@ var EmployeeService = class {
     if (data.userId) {
       const user = await EmployeeRepository.findUserById(data.userId);
       if (!user) {
-        throw new ErrorResponse("Associated User account not found", 404 /* Not_Found */);
+        throw new ErrorResponse2("Associated User account not found", 404 /* Not_Found */);
       }
       const existingUserBinding = await EmployeeRepository.findByUserId(data.userId);
       if (existingUserBinding) {
-        throw new ErrorResponse("This User account is already linked to another employee", 409 /* Conflict */);
+        throw new ErrorResponse2("This User account is already linked to another employee", 409 /* Conflict */);
       }
     }
     const effectiveOrgId = organizationId || (await prisma.organization.findFirst())?.id || null;
@@ -13070,7 +13070,7 @@ var EmployeeService = class {
     }
     if (data.managerId) {
       if (data.managerId === employeeId) {
-        throw new ErrorResponse("An employee cannot be their own manager", 400 /* Bad_Request */);
+        throw new ErrorResponse2("An employee cannot be their own manager", 400 /* Bad_Request */);
       }
       let managerIdInDb = null;
       const managerById = await EmployeeRepository.findById(data.managerId);
@@ -13089,7 +13089,7 @@ var EmployeeService = class {
         data.managerId = managerIdInDb;
       }
       if (data.managerId === employeeId) {
-        throw new ErrorResponse("An employee cannot be their own manager", 400 /* Bad_Request */);
+        throw new ErrorResponse2("An employee cannot be their own manager", 400 /* Bad_Request */);
       }
     }
     const { roleId: requestedRoleId, department: _rawDept, ...employeeFields } = data;
@@ -13244,22 +13244,22 @@ var EmployeeService = class {
   static async updateEmployee(id, data) {
     const employee = await EmployeeRepository.findById(id);
     if (!employee) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     if (data.email && data.email !== employee.email) {
       const existingEmail = await EmployeeRepository.findByEmail(data.email);
       if (existingEmail) {
-        throw new ErrorResponse("Email is already in use by another employee", 409 /* Conflict */);
+        throw new ErrorResponse2("Email is already in use by another employee", 409 /* Conflict */);
       }
     }
     if (data.userId && data.userId !== employee.userId) {
       const user = await EmployeeRepository.findUserById(data.userId);
       if (!user) {
-        throw new ErrorResponse("Associated User account not found", 404 /* Not_Found */);
+        throw new ErrorResponse2("Associated User account not found", 404 /* Not_Found */);
       }
       const existingUserBinding = await EmployeeRepository.findByUserId(data.userId);
       if (existingUserBinding) {
-        throw new ErrorResponse("This User account is already linked to another employee", 409 /* Conflict */);
+        throw new ErrorResponse2("This User account is already linked to another employee", 409 /* Conflict */);
       }
     }
     const effectiveOrgId = employee.organizationId || null;
@@ -13304,7 +13304,7 @@ var EmployeeService = class {
     }
     if (data.managerId && data.managerId !== employee.managerId) {
       if (data.managerId === id) {
-        throw new ErrorResponse("An employee cannot be their own manager", 400 /* Bad_Request */);
+        throw new ErrorResponse2("An employee cannot be their own manager", 400 /* Bad_Request */);
       }
       let managerIdInDb = null;
       const managerById = await EmployeeRepository.findById(data.managerId);
@@ -13323,7 +13323,7 @@ var EmployeeService = class {
         data.managerId = managerIdInDb;
       }
       if (data.managerId === id) {
-        throw new ErrorResponse("An employee cannot be their own manager", 400 /* Bad_Request */);
+        throw new ErrorResponse2("An employee cannot be their own manager", 400 /* Bad_Request */);
       }
     }
     if (data.password) {
@@ -13361,7 +13361,7 @@ var EmployeeService = class {
   static async deleteEmployee(id) {
     const employee = await EmployeeRepository.findById(id);
     if (!employee) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     return EmployeeRepository.delete(id);
   }
@@ -13388,7 +13388,7 @@ var EmployeeService = class {
   static async updateEmployeeSalary(id, data) {
     const employee = await EmployeeRepository.findById(id);
     if (!employee) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     return EmployeeRepository.update(id, data);
   }
@@ -13413,7 +13413,7 @@ var EmployeeService = class {
   static async updateEmployeePersonal(id, data) {
     const employee = await EmployeeRepository.findById(id);
     if (!employee) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     return EmployeeRepository.update(id, data);
   }
@@ -13428,7 +13428,7 @@ var EmployeeService = class {
   static async addEmployeeFamilyMember(employeeId, data) {
     const employee = await EmployeeRepository.findById(employeeId);
     if (!employee) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     return EmployeeRepository.createFamilyMember(employeeId, data);
   }
@@ -13439,14 +13439,14 @@ var EmployeeService = class {
   static async getEmployeeExit(employeeId) {
     const employee = await EmployeeRepository.findById(employeeId);
     if (!employee) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     return EmployeeRepository.findExitByEmployeeId(employeeId);
   }
   static async upsertEmployeeExit(employeeId, data) {
     const employee = await EmployeeRepository.findById(employeeId);
     if (!employee) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     const exitRecord = await EmployeeRepository.upsertExit(employeeId, data);
     const isApproved = data.status === "CLEARANCE_APPROVED" || data.status === "SETTLED" || data.itClearance && data.financeClearance && data.adminClearance && data.hrClearance;
@@ -13461,10 +13461,10 @@ var EmployeeService = class {
   static async resetEmployeeCredentials(employeeId, data, requestingUser) {
     const employee = await EmployeeRepository.findById(employeeId);
     if (!employee) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     if (requestingUser && !requestingUser.isPlatformAdmin && requestingUser.role?.name !== "PLATFORM_ADMIN" && employee.organizationId && requestingUser.organizationId && employee.organizationId !== requestingUser.organizationId) {
-      throw new ErrorResponse("You do not have permission to manage credentials for this employee", 403 /* Forbidden */);
+      throw new ErrorResponse2("You do not have permission to manage credentials for this employee", 403 /* Forbidden */);
     }
     const emailToSet = (data.newEmail || data.email)?.trim().toLowerCase();
     let plainPassword = (data.newPassword || data.password)?.trim();
@@ -13480,7 +13480,7 @@ var EmployeeService = class {
         }
       });
       if (existingEmployeeWithEmail) {
-        throw new ErrorResponse(`Email '${emailToSet}' is already assigned to another employee`, 409 /* Conflict */);
+        throw new ErrorResponse2(`Email '${emailToSet}' is already assigned to another employee`, 409 /* Conflict */);
       }
       const existingUserWithEmail = await prisma.user.findFirst({
         where: {
@@ -13489,7 +13489,7 @@ var EmployeeService = class {
         }
       });
       if (existingUserWithEmail) {
-        throw new ErrorResponse(`Email '${emailToSet}' is already linked to another user account`, 409 /* Conflict */);
+        throw new ErrorResponse2(`Email '${emailToSet}' is already linked to another user account`, 409 /* Conflict */);
       }
     }
     const finalEmail = emailToSet || employee.email;
@@ -13592,10 +13592,10 @@ var EmployeeService = class {
   static async getEmployeeCredentials(employeeId, requestingUser) {
     const employee = await EmployeeRepository.findById(employeeId);
     if (!employee) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     if (requestingUser && !requestingUser.isPlatformAdmin && requestingUser.role?.name !== "PLATFORM_ADMIN" && employee.organizationId && requestingUser.organizationId && employee.organizationId !== requestingUser.organizationId) {
-      throw new ErrorResponse("You do not have permission to view credentials for this employee", 403 /* Forbidden */);
+      throw new ErrorResponse2("You do not have permission to view credentials for this employee", 403 /* Forbidden */);
     }
     return {
       employeeId: employee.id,
@@ -13934,7 +13934,7 @@ var checkEmployeeAccess = async (req, employeeId) => {
   const isSelf = req.user.id === employee.userId;
   const isAdmin = req.user.role && ["SUPER_ADMIN", "HR_ADMIN"].includes(req.user.role.name);
   if (!isSelf && !isAdmin) {
-    throw new ErrorResponse("You do not have permission to access this resource", 403 /* Forbidden */);
+    throw new ErrorResponse2("You do not have permission to access this resource", 403 /* Forbidden */);
   }
   return employee;
 };
@@ -13961,7 +13961,7 @@ var updateEmployeeSalary = asyncHandler(async (req, res, next) => {
   const id = req.params.id;
   const isAdmin = req.user.role && ["SUPER_ADMIN", "HR_ADMIN"].includes(req.user.role.name);
   if (!isAdmin) {
-    return next(new ErrorResponse("You do not have permission to perform this action", 403 /* Forbidden */));
+    return next(new ErrorResponse2("You do not have permission to perform this action", 403 /* Forbidden */));
   }
   const parsed = updateSalarySchema.safeParse(req.body);
   if (!parsed.success) {
@@ -13998,7 +13998,7 @@ var updateEmployeePersonal = asyncHandler(async (req, res, next) => {
   const id = req.params.id;
   const employee = await checkEmployeeAccess(req, id);
   if (!employee) {
-    return next(new ErrorResponse("Employee not found", 404 /* Not_Found */));
+    return next(new ErrorResponse2("Employee not found", 404 /* Not_Found */));
   }
   const parsed = updatePersonalSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -14035,7 +14035,7 @@ var addEmployeeFamilyMember = asyncHandler(async (req, res, next) => {
   const id = req.params.id;
   const employee = await checkEmployeeAccess(req, id);
   if (!employee) {
-    return next(new ErrorResponse("Employee not found", 404 /* Not_Found */));
+    return next(new ErrorResponse2("Employee not found", 404 /* Not_Found */));
   }
   const parsed = addFamilyMemberSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -14082,7 +14082,7 @@ var saveEmployeeExit = asyncHandler(async (req, res, next) => {
   const id = req.params.id;
   const employee = await checkEmployeeAccess(req, id);
   if (!employee) {
-    return next(new ErrorResponse("Employee not found", 404 /* Not_Found */));
+    return next(new ErrorResponse2("Employee not found", 404 /* Not_Found */));
   }
   const parsed = saveEmployeeExitSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -14099,7 +14099,7 @@ var saveEmployeeExit = asyncHandler(async (req, res, next) => {
 var resetEmployeeCredentials = asyncHandler(async (req, res, next) => {
   const id = req.params.id;
   if (!id) {
-    return next(new ErrorResponse("Employee ID is required", 400 /* Bad_Request */));
+    return next(new ErrorResponse2("Employee ID is required", 400 /* Bad_Request */));
   }
   const parsed = resetEmployeeCredentialsSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -14116,7 +14116,7 @@ var resetEmployeeCredentials = asyncHandler(async (req, res, next) => {
 var getEmployeeCredentials = asyncHandler(async (req, res, next) => {
   const id = req.params.id;
   if (!id) {
-    return next(new ErrorResponse("Employee ID is required", 400 /* Bad_Request */));
+    return next(new ErrorResponse2("Employee ID is required", 400 /* Bad_Request */));
   }
   const result = await EmployeeService.getEmployeeCredentials(id, req.user);
   return SuccessResponse(
@@ -14156,6 +14156,19 @@ import { Router as Router8 } from "express";
 var EngagementRepository = class {
   // Feed Announcements
   static async findPosts(employeeId, organizationId) {
+    try {
+      await prisma.engagementPost.deleteMany({
+        where: {
+          content: {
+            in: [
+              "Welcome to our company portal! Let's collaborate and achieve great milestones together.",
+              "Announcing the WFH Hybrid Policy Review 2026. Please share your feedback in the Surveys tab."
+            ]
+          }
+        }
+      });
+    } catch {
+    }
     const where = {};
     if (organizationId) {
       where.organizationId = organizationId;
@@ -14185,7 +14198,7 @@ var EngagementRepository = class {
         id: post.id,
         author: post.authorName,
         authorRole: post.authorRole,
-        authorAvatar: post.authorAvatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop",
+        authorAvatar: post.authorAvatar || null,
         content: post.content,
         image: post.image,
         likes: post.likesCount,
@@ -14205,6 +14218,11 @@ var EngagementRepository = class {
   static async createPost(data) {
     return prisma.engagementPost.create({
       data
+    });
+  }
+  static async deletePost(id) {
+    return prisma.engagementPost.delete({
+      where: { id }
     });
   }
   static async addComment(data) {
@@ -14290,19 +14308,35 @@ var EngagementRepository = class {
         counts[m.mood] = current + 1;
       }
     });
-    const thrilledPct = total > 0 ? Math.round((counts.THRILLED || 0) / total * 100) : 52;
-    const contentPct = total > 0 ? Math.round((counts.CONTENT || 0) / total * 100) : 32;
-    const neutralPct = total > 0 ? Math.round((counts.NEUTRAL || 0) / total * 100) : 12;
-    const stressedPct = total > 0 ? Math.round((counts.STRESSED || 0) / total * 100) : 4;
+    const thrilledPct = total > 0 ? Math.round((counts.THRILLED || 0) / total * 100) : 0;
+    const contentPct = total > 0 ? Math.round((counts.CONTENT || 0) / total * 100) : 0;
+    const neutralPct = total > 0 ? Math.round((counts.NEUTRAL || 0) / total * 100) : 0;
+    const stressedPct = total > 0 ? Math.round((counts.STRESSED || 0) / total * 100) : 0;
     return {
       thrilled: thrilledPct,
       content: contentPct,
       neutral: neutralPct,
-      stressed: stressedPct
+      stressed: stressedPct,
+      totalResponses: total
     };
   }
   // Surveys
   static async findSurveys(employeeId, organizationId) {
+    try {
+      await prisma.corporateSurvey.deleteMany({
+        where: {
+          title: {
+            in: [
+              "WFH Hybrid Policy Review 2026",
+              "Q3 Work-Life Balance & Remote Policy Pulse",
+              "Office Cafeteria & Wellness Amenities Survey",
+              "Q2 Engineering Tooling & DevOps Infrastructure"
+            ]
+          }
+        }
+      });
+    } catch {
+    }
     const where = {};
     if (organizationId) {
       where.organizationId = organizationId;
@@ -14345,41 +14379,18 @@ var EngagementRepository = class {
       data
     });
   }
+  static async deleteSurvey(id) {
+    return prisma.corporateSurvey.delete({
+      where: { id }
+    });
+  }
 };
 
 // src/module/engagement/services/engagement.service.ts
 var EngagementService = class {
   // Feed Announcements
   static async getPosts(employeeId, organizationId) {
-    let posts = await EngagementRepository.findPosts(employeeId, organizationId);
-    if (posts.length === 0 && organizationId) {
-      const employee = await prisma.employee.findFirst({
-        where: { organizationId }
-      });
-      const authorName = employee ? employee.name : "HR Department";
-      const authorRole = employee ? employee.designation || "HR Lead" : "HR Manager";
-      const post1 = await EngagementRepository.createPost({
-        authorName,
-        authorRole,
-        authorAvatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop",
-        content: "Welcome to our company portal! Let's collaborate and achieve great milestones together.",
-        organizationId
-      });
-      const post2 = await EngagementRepository.createPost({
-        authorName: "System Administrator",
-        authorRole: "Corporate Operations",
-        authorAvatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop",
-        content: "Announcing the WFH Hybrid Policy Review 2026. Please share your feedback in the Surveys tab.",
-        organizationId
-      });
-      await EngagementRepository.addComment({
-        postId: post1.id,
-        userName: "Team Member",
-        text: "Excited to be part of the team!"
-      });
-      posts = await EngagementRepository.findPosts(employeeId, organizationId);
-    }
-    return posts;
+    return EngagementRepository.findPosts(employeeId, organizationId);
   }
   static async createPost(data, organizationId) {
     return EngagementRepository.createPost({
@@ -14387,32 +14398,39 @@ var EngagementService = class {
       organizationId: organizationId || null
     });
   }
+  static async deletePost(postId) {
+    const post = await prisma.engagementPost.findUnique({ where: { id: postId } });
+    if (!post) {
+      throw new ErrorResponse2("Post not found", 404 /* Not_Found */);
+    }
+    return EngagementRepository.deletePost(postId);
+  }
   static async addComment(data) {
     const post = await prisma.engagementPost.findUnique({ where: { id: data.postId } });
     if (!post) {
-      throw new ErrorResponse("Post not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Post not found", 404 /* Not_Found */);
     }
     return EngagementRepository.addComment(data);
   }
   static async toggleLike(postId, employeeId) {
     const post = await prisma.engagementPost.findUnique({ where: { id: postId } });
     if (!post) {
-      throw new ErrorResponse("Post not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Post not found", 404 /* Not_Found */);
     }
     const employee = await prisma.employee.findUnique({ where: { id: employeeId } });
     if (!employee) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     return EngagementRepository.toggleLike(postId, employeeId);
   }
   static async addReaction(postId, employeeId, type) {
     const post = await prisma.engagementPost.findUnique({ where: { id: postId } });
     if (!post) {
-      throw new ErrorResponse("Post not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Post not found", 404 /* Not_Found */);
     }
     const employee = await prisma.employee.findUnique({ where: { id: employeeId } });
     if (!employee) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     return EngagementRepository.addReaction(postId, employeeId, type);
   }
@@ -14420,7 +14438,7 @@ var EngagementService = class {
   static async submitMood(employeeId, mood, weekKey) {
     const employee = await prisma.employee.findUnique({ where: { id: employeeId } });
     if (!employee) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     return EngagementRepository.submitMood(employeeId, mood, weekKey);
   }
@@ -14429,28 +14447,29 @@ var EngagementService = class {
   }
   // Surveys
   static async getSurveys(employeeId, organizationId) {
-    let surveys = await EngagementRepository.findSurveys(employeeId, organizationId);
-    if (surveys.length === 0 && organizationId) {
-      const closesAt = /* @__PURE__ */ new Date();
-      closesAt.setDate(closesAt.getDate() + 7);
-      await EngagementRepository.createSurvey({
-        title: "WFH Hybrid Policy Review 2026",
-        question: "How satisfied are you with our current work environment?",
-        closesAt,
-        organizationId
-      });
-      surveys = await EngagementRepository.findSurveys(employeeId, organizationId);
+    return EngagementRepository.findSurveys(employeeId, organizationId);
+  }
+  static async createSurvey(data, organizationId) {
+    return EngagementRepository.createSurvey({
+      ...data,
+      organizationId: organizationId || null
+    });
+  }
+  static async deleteSurvey(surveyId) {
+    const survey = await prisma.corporateSurvey.findUnique({ where: { id: surveyId } });
+    if (!survey) {
+      throw new ErrorResponse2("Survey not found", 404 /* Not_Found */);
     }
-    return surveys;
+    return EngagementRepository.deleteSurvey(surveyId);
   }
   static async submitSurveyResponse(surveyId, employeeId, rating) {
     const survey = await prisma.corporateSurvey.findUnique({ where: { id: surveyId } });
     if (!survey) {
-      throw new ErrorResponse("Survey not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Survey not found", 404 /* Not_Found */);
     }
     const employee = await prisma.employee.findUnique({ where: { id: employeeId } });
     if (!employee) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     return EngagementRepository.submitSurveyResponse(surveyId, employeeId, rating);
   }
@@ -14491,6 +14510,11 @@ var submitSurveyResponseSchema = z7.object({
   employeeId: z7.string({ message: "Employee ID is required" }),
   rating: z7.number().int().min(1).max(5)
 });
+var createSurveySchema = z7.object({
+  title: z7.string({ message: "Survey title is required" }).min(1),
+  question: z7.string({ message: "Survey question is required" }).min(1),
+  closesAt: z7.union([z7.string(), z7.date()]).transform((val) => new Date(val))
+});
 
 // src/module/engagement/controllers/engagement.controller.ts
 var getPosts = asyncHandler(async (req, res, next) => {
@@ -14514,6 +14538,19 @@ var createPost = asyncHandler(async (req, res, next) => {
     "Post published on company feed successfully",
     post,
     201 /* Created */
+  );
+});
+var deletePost = asyncHandler(async (req, res, next) => {
+  const postId = req.params.id || req.body?.id || req.body?.postId || req.query.id;
+  if (!postId) {
+    return next(new ErrorResponse("Post ID is required", 400 /* Bad_Request */));
+  }
+  await EngagementService.deletePost(postId);
+  return SuccessResponse(
+    res,
+    "Post removed from feed successfully",
+    null,
+    200 /* OK */
   );
 });
 var addComment = asyncHandler(async (req, res, next) => {
@@ -14612,18 +14649,54 @@ var submitSurveyResponse = asyncHandler(async (req, res, next) => {
     200 /* OK */
   );
 });
+var createSurvey = asyncHandler(async (req, res, next) => {
+  const parsed = createSurveySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return next(parsed.error);
+  }
+  const survey = await EngagementService.createSurvey(
+    parsed.data,
+    req.user?.organizationId
+  );
+  return SuccessResponse(
+    res,
+    "Corporate pulse survey created successfully",
+    survey,
+    201 /* Created */
+  );
+});
+var deleteSurvey = asyncHandler(async (req, res, next) => {
+  const surveyId = req.params.id || req.body?.id || req.body?.surveyId || req.query.id;
+  if (!surveyId) {
+    return next(new ErrorResponse("Survey ID is required", 400 /* Bad_Request */));
+  }
+  await EngagementService.deleteSurvey(surveyId);
+  return SuccessResponse(
+    res,
+    "Corporate survey removed successfully",
+    null,
+    200 /* OK */
+  );
+});
 
 // src/module/engagement/routes/engagement.routes.ts
 var router8 = Router8();
 router8.use(protect);
 router8.get("/posts", hasPermission("VIEW_SOCIAL_FEED", "VIEW_ENGAGEMENT"), getPosts);
 router8.post("/posts", hasPermission("CREATE_SOCIAL_POST", "CREATE_ENGAGEMENT"), createPost);
+router8.delete("/posts/:id", hasPermission("CREATE_SOCIAL_POST", "CREATE_ENGAGEMENT", "VIEW_SOCIAL_FEED", "VIEW_ENGAGEMENT"), deletePost);
+router8.post("/posts/delete", hasPermission("CREATE_SOCIAL_POST", "CREATE_ENGAGEMENT", "VIEW_SOCIAL_FEED", "VIEW_ENGAGEMENT"), deletePost);
+router8.post("/posts/:id/delete", hasPermission("CREATE_SOCIAL_POST", "CREATE_ENGAGEMENT", "VIEW_SOCIAL_FEED", "VIEW_ENGAGEMENT"), deletePost);
 router8.post("/posts/comment", hasPermission("CREATE_SOCIAL_POST", "CREATE_ENGAGEMENT"), addComment);
 router8.post("/posts/like", hasPermission("CREATE_SOCIAL_POST", "CREATE_ENGAGEMENT"), toggleLike);
 router8.post("/posts/react", hasPermission("CREATE_SOCIAL_POST", "CREATE_ENGAGEMENT"), addReaction);
 router8.get("/mood", hasPermission("VIEW_MOOD_ANALYSIS", "VIEW_ENGAGEMENT"), getMoodDistribution);
 router8.post("/mood", hasPermission("CREATE_SOCIAL_POST", "CREATE_ENGAGEMENT"), submitMood);
 router8.get("/surveys", hasPermission("VIEW_SURVEYS", "VIEW_ENGAGEMENT"), getSurveys);
+router8.post("/surveys", hasPermission("VIEW_SURVEYS", "CREATE_SURVEYS", "CREATE_ENGAGEMENT"), createSurvey);
+router8.delete("/surveys/:id", hasPermission("VIEW_SURVEYS", "CREATE_SURVEYS", "CREATE_ENGAGEMENT", "VIEW_ENGAGEMENT"), deleteSurvey);
+router8.post("/surveys/delete", hasPermission("VIEW_SURVEYS", "CREATE_SURVEYS", "CREATE_ENGAGEMENT", "VIEW_ENGAGEMENT"), deleteSurvey);
+router8.post("/surveys/:id/delete", hasPermission("VIEW_SURVEYS", "CREATE_SURVEYS", "CREATE_ENGAGEMENT", "VIEW_ENGAGEMENT"), deleteSurvey);
 router8.post("/surveys/respond", hasPermission("VIEW_SURVEYS", "CREATE_SURVEYS", "CREATE_ENGAGEMENT"), submitSurveyResponse);
 var engagement_routes_default = router8;
 
@@ -14734,7 +14807,7 @@ var HelpDeskService = class {
       where: { id: data.employeeId }
     });
     if (!employee) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     const ticketOrgId = organizationId || employee.organizationId || null;
     const slaHoursLeft = data.priority === "High" ? 4 : data.priority === "Medium" ? 12 : 24;
@@ -14749,10 +14822,10 @@ var HelpDeskService = class {
   static async resolveTicket(id, organizationId) {
     const ticket = await HelpDeskRepository.findTicketById(id);
     if (!ticket) {
-      throw new ErrorResponse("Support ticket not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Support ticket not found", 404 /* Not_Found */);
     }
     if (organizationId && ticket.organizationId && ticket.organizationId !== organizationId) {
-      throw new ErrorResponse("You do not have permission to resolve tickets for another organization", 403 /* Forbidden */);
+      throw new ErrorResponse2("You do not have permission to resolve tickets for another organization", 403 /* Forbidden */);
     }
     return HelpDeskRepository.updateTicketStatus(id, "Resolved", 0);
   }
@@ -15078,11 +15151,11 @@ var LeaveService = class _LeaveService {
     const orgId = organizationId || data.organizationId || null;
     const existingName = await LeaveRepository.findTypeByName(data.name, orgId);
     if (existingName) {
-      throw new ErrorResponse("Leave type name already exists in your organization", 409 /* Conflict */);
+      throw new ErrorResponse2("Leave type name already exists in your organization", 409 /* Conflict */);
     }
     const existingCode = await LeaveRepository.findTypeByCode(data.code, orgId);
     if (existingCode) {
-      throw new ErrorResponse("Leave type code already exists in your organization", 409 /* Conflict */);
+      throw new ErrorResponse2("Leave type code already exists in your organization", 409 /* Conflict */);
     }
     return LeaveRepository.createType({
       ...data,
@@ -15112,26 +15185,26 @@ var LeaveService = class _LeaveService {
   static async getLeaveTypeById(id) {
     const type = await LeaveRepository.findTypeById(id);
     if (!type) {
-      throw new ErrorResponse("Leave type not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Leave type not found", 404 /* Not_Found */);
     }
     return type;
   }
   static async updateLeaveType(id, data, organizationId) {
     const type = await LeaveRepository.findTypeById(id);
     if (!type) {
-      throw new ErrorResponse("Leave type not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Leave type not found", 404 /* Not_Found */);
     }
     const orgId = organizationId || type.organizationId || void 0;
     if (data.name && data.name !== type.name) {
       const existingName = await LeaveRepository.findTypeByName(data.name, orgId);
       if (existingName) {
-        throw new ErrorResponse("Leave type name already exists in your organization", 409 /* Conflict */);
+        throw new ErrorResponse2("Leave type name already exists in your organization", 409 /* Conflict */);
       }
     }
     if (data.code && data.code !== type.code) {
       const existingCode = await LeaveRepository.findTypeByCode(data.code, orgId);
       if (existingCode) {
-        throw new ErrorResponse("Leave type code already exists in your organization", 409 /* Conflict */);
+        throw new ErrorResponse2("Leave type code already exists in your organization", 409 /* Conflict */);
       }
     }
     return LeaveRepository.updateType(id, data);
@@ -15139,7 +15212,7 @@ var LeaveService = class _LeaveService {
   static async deleteLeaveType(id) {
     const type = await LeaveRepository.findTypeById(id);
     if (!type) {
-      throw new ErrorResponse("Leave type not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Leave type not found", 404 /* Not_Found */);
     }
     const allocationsCount = await prisma.leaveAllocation.count({ where: { leaveTypeId: id } });
     const requestsCount = await prisma.leaveRequest.count({ where: { leaveTypeId: id } });
@@ -15152,12 +15225,12 @@ var LeaveService = class _LeaveService {
   static async allocateLeave(data, organizationId) {
     const resolvedId = await _LeaveService.resolveEmployeeId(data.employeeId, organizationId);
     if (!resolvedId) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     data.employeeId = resolvedId;
     const type = await LeaveRepository.findTypeById(data.leaveTypeId);
     if (!type) {
-      throw new ErrorResponse("Leave type not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Leave type not found", 404 /* Not_Found */);
     }
     const allocOrgId = organizationId || type.organizationId || null;
     const existing = await LeaveRepository.findAllocation(data.employeeId, data.leaveTypeId, data.year);
@@ -15205,12 +15278,12 @@ var LeaveService = class _LeaveService {
   static async requestLeave(data, organizationId) {
     const resolvedId = await _LeaveService.resolveEmployeeId(data.employeeId, organizationId);
     if (!resolvedId) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     data.employeeId = resolvedId;
     const reqOrgId = organizationId || null;
     if (!data.leaveTypeId || String(data.leaveTypeId).trim() === "") {
-      throw new ErrorResponse("Please select a leave category", 400 /* Bad_Request */);
+      throw new ErrorResponse2("Please select a leave category", 400 /* Bad_Request */);
     }
     let leaveType = await LeaveRepository.findTypeById(data.leaveTypeId);
     if (!leaveType) {
@@ -15243,15 +15316,15 @@ var LeaveService = class _LeaveService {
     }
     if (!leaveType || !leaveType.isActive) {
       console.error(`[Leave Request Error] Active leave type not found for input: "${data.leaveTypeId}"`);
-      throw new ErrorResponse("Active leave type not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Active leave type not found", 404 /* Not_Found */);
     }
     data.leaveTypeId = leaveType.id;
     if (data.startDate > data.endDate) {
-      throw new ErrorResponse("Start date cannot be after end date", 400 /* Bad_Request */);
+      throw new ErrorResponse2("Start date cannot be after end date", 400 /* Bad_Request */);
     }
     const totalDays = calculateDays(data.startDate, data.endDate, data.halfDay);
     if (totalDays <= 0) {
-      throw new ErrorResponse("Total leave duration must be greater than 0", 400 /* Bad_Request */);
+      throw new ErrorResponse2("Total leave duration must be greater than 0", 400 /* Bad_Request */);
     }
     const year = data.startDate.getFullYear();
     let allocation = await LeaveRepository.findAllocation(data.employeeId, data.leaveTypeId, year);
@@ -15308,7 +15381,7 @@ var LeaveService = class _LeaveService {
     if (!isUnpaid) {
       const remainingBalance = allocation.allocated + allocation.carriedForward - (allocation.used + allocation.pending);
       if (remainingBalance < totalDays) {
-        throw new ErrorResponse(
+        throw new ErrorResponse2(
           `Insufficient leave balance. Requested: ${totalDays} days | Available: ${remainingBalance} days`,
           400 /* Bad_Request */
         );
@@ -15354,25 +15427,25 @@ var LeaveService = class _LeaveService {
   static async getLeaveRequestById(id) {
     const request = await LeaveRepository.findRequestById(id);
     if (!request) {
-      throw new ErrorResponse("Leave request not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Leave request not found", 404 /* Not_Found */);
     }
     return request;
   }
   static async processLeaveRequest(id, approverId, status, rejectionReason, organizationId) {
     const request = await LeaveRepository.findRequestById(id);
     if (!request) {
-      throw new ErrorResponse("Leave request not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Leave request not found", 404 /* Not_Found */);
     }
     if (organizationId && request.organizationId && request.organizationId !== organizationId) {
-      throw new ErrorResponse("You do not have permission to process leave requests for another organization", 403 /* Forbidden */);
+      throw new ErrorResponse2("You do not have permission to process leave requests for another organization", 403 /* Forbidden */);
     }
     if (request.status !== "PENDING") {
-      throw new ErrorResponse(`Leave request has already been ${request.status.toLowerCase()}`, 400 /* Bad_Request */);
+      throw new ErrorResponse2(`Leave request has already been ${request.status.toLowerCase()}`, 400 /* Bad_Request */);
     }
     const year = request.startDate.getFullYear();
     const allocation = await LeaveRepository.findAllocation(request.employeeId, request.leaveTypeId, year);
     if (!allocation) {
-      throw new ErrorResponse("Employee leave balance allocation not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee leave balance allocation not found", 404 /* Not_Found */);
     }
     return prisma.$transaction(async (tx) => {
       const updatedRequest = await tx.leaveRequest.update({
@@ -15410,25 +15483,25 @@ var LeaveService = class _LeaveService {
   static async cancelLeaveRequest(id, userId, organizationId) {
     const request = await LeaveRepository.findRequestById(id);
     if (!request) {
-      throw new ErrorResponse("Leave request not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Leave request not found", 404 /* Not_Found */);
     }
     if (organizationId && request.organizationId && request.organizationId !== organizationId) {
-      throw new ErrorResponse("You do not have permission to cancel leave requests for another organization", 403 /* Forbidden */);
+      throw new ErrorResponse2("You do not have permission to cancel leave requests for another organization", 403 /* Forbidden */);
     }
     if (request.status === "CANCELLED" || request.status === "REJECTED") {
-      throw new ErrorResponse(`Request is already ${request.status.toLowerCase()}`, 400 /* Bad_Request */);
+      throw new ErrorResponse2(`Request is already ${request.status.toLowerCase()}`, 400 /* Bad_Request */);
     }
     const today = /* @__PURE__ */ new Date();
     today.setHours(0, 0, 0, 0);
     const start = new Date(request.startDate);
     start.setHours(0, 0, 0, 0);
     if (request.status === "APPROVED" && start < today) {
-      throw new ErrorResponse("Cannot cancel an approved leave that has already started or passed", 400 /* Bad_Request */);
+      throw new ErrorResponse2("Cannot cancel an approved leave that has already started or passed", 400 /* Bad_Request */);
     }
     const year = request.startDate.getFullYear();
     const allocation = await LeaveRepository.findAllocation(request.employeeId, request.leaveTypeId, year);
     if (!allocation) {
-      throw new ErrorResponse("Employee leave balance allocation not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee leave balance allocation not found", 404 /* Not_Found */);
     }
     return prisma.$transaction(async (tx) => {
       const cancelledRequest = await tx.leaveRequest.update({
@@ -15966,7 +16039,7 @@ var OrganizationService = class _OrganizationService {
   static async create(data) {
     const existing = await OrganizationRepository.findByName(data.name);
     if (existing) {
-      throw new ErrorResponse(
+      throw new ErrorResponse2(
         `An organization named "${data.name}" already exists`,
         409 /* Conflict */
       );
@@ -15996,7 +16069,7 @@ var OrganizationService = class _OrganizationService {
   static async getById(id) {
     const org = await OrganizationRepository.findById(id);
     if (!org) {
-      throw new ErrorResponse("Organization not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Organization not found", 404 /* Not_Found */);
     }
     return org;
   }
@@ -16026,16 +16099,16 @@ var MembershipService = class {
   static async addMember(orgId, data) {
     const org = await OrganizationRepository.findById(orgId);
     if (!org) {
-      throw new ErrorResponse("Organization not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Organization not found", 404 /* Not_Found */);
     }
     const user = await prisma.user.findUnique({ where: { id: data.userId } });
     if (!user) {
-      throw new ErrorResponse("User not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("User not found", 404 /* Not_Found */);
     }
     if (data.roleId) {
       const role = await prisma.role.findUnique({ where: { id: data.roleId } });
       if (!role) {
-        throw new ErrorResponse(
+        throw new ErrorResponse2(
           `Role with id "${data.roleId}" not found`,
           404 /* Not_Found */
         );
@@ -16043,7 +16116,7 @@ var MembershipService = class {
     }
     const existing = await MembershipRepository.findByCompositeKey(data.userId, orgId);
     if (existing) {
-      throw new ErrorResponse(
+      throw new ErrorResponse2(
         "User is already a member of this organization",
         409 /* Conflict */
       );
@@ -16062,7 +16135,7 @@ var MembershipService = class {
   static async removeMember(orgId, userId) {
     const membership = await MembershipRepository.findByCompositeKey(userId, orgId);
     if (!membership) {
-      throw new ErrorResponse("Membership not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Membership not found", 404 /* Not_Found */);
     }
     return MembershipRepository.delete(userId, orgId);
   }
@@ -16074,12 +16147,12 @@ var MembershipService = class {
   static async updateMembership(orgId, userId, data) {
     const membership = await MembershipRepository.findByCompositeKey(userId, orgId);
     if (!membership) {
-      throw new ErrorResponse("Membership not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Membership not found", 404 /* Not_Found */);
     }
     if (data.roleId) {
       const role = await prisma.role.findUnique({ where: { id: data.roleId } });
       if (!role) {
-        throw new ErrorResponse(
+        throw new ErrorResponse2(
           `Role with id "${data.roleId}" not found`,
           404 /* Not_Found */
         );
@@ -16095,7 +16168,7 @@ var MembershipService = class {
   static async listMembers(orgId, statusFilter) {
     const org = await OrganizationRepository.findById(orgId);
     if (!org) {
-      throw new ErrorResponse("Organization not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Organization not found", 404 /* Not_Found */);
     }
     const members = await MembershipRepository.findByOrganization(orgId, {
       status: statusFilter
@@ -16122,7 +16195,7 @@ var MembershipService = class {
   static async getMembership(orgId, userId) {
     const membership = await MembershipRepository.findByCompositeKeyWithRelations(userId, orgId);
     if (!membership) {
-      throw new ErrorResponse("Membership not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Membership not found", 404 /* Not_Found */);
     }
     return membership;
   }
@@ -16485,7 +16558,7 @@ var CompanyDirectoryService = class {
   static async getCompanyById(id) {
     const company = await CompanyDirectoryRepository.findCompanyById(id);
     if (!company) {
-      throw new ErrorResponse("Company not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Company not found", 404 /* Not_Found */);
     }
     return company;
   }
@@ -16506,7 +16579,7 @@ var CompanyDirectoryService = class {
         where: { email: adminEmail }
       });
       if (existingUser) {
-        throw new ErrorResponse(
+        throw new ErrorResponse2(
           `A user with email "${adminEmail}" already exists. Cannot create organization admin.`,
           409 /* Conflict */
         );
@@ -16515,7 +16588,7 @@ var CompanyDirectoryService = class {
         where: { name: companyData.name }
       });
       if (existingOrg) {
-        throw new ErrorResponse(
+        throw new ErrorResponse2(
           `An organization named "${companyData.name}" already exists.`,
           409 /* Conflict */
         );
@@ -16606,14 +16679,14 @@ var CompanyDirectoryService = class {
   static async updateCompany(id, data) {
     const updated = await CompanyDirectoryRepository.updateCompany(id, data);
     if (!updated) {
-      throw new ErrorResponse("Company not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Company not found", 404 /* Not_Found */);
     }
     return updated;
   }
   static async deleteCompany(id) {
     const company = await CompanyDirectoryRepository.findCompanyById(id);
     if (!company) {
-      throw new ErrorResponse("Company not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Company not found", 404 /* Not_Found */);
     }
     await CompanyDirectoryRepository.deleteCompany(id);
     return { success: true, message: "Company deleted successfully" };
@@ -16625,7 +16698,7 @@ var CompanyDirectoryService = class {
   static async resetCredentials(companyId, data) {
     const rawPassword = (data.newPassword || data.password || "").trim();
     if (!rawPassword || rawPassword.length < 6) {
-      throw new ErrorResponse("Password is required and must be at least 6 characters long", 400 /* Bad_Request */);
+      throw new ErrorResponse2("Password is required and must be at least 6 characters long", 400 /* Bad_Request */);
     }
     const rawEmail = (data.newEmail || data.email || "").trim();
     const cleanEmail = rawEmail ? rawEmail.toLowerCase() : void 0;
@@ -16672,7 +16745,7 @@ var CompanyDirectoryService = class {
       }
     }
     if (!organization) {
-      throw new ErrorResponse(`Organization with ID "${companyId}" not found`, 404 /* Not_Found */);
+      throw new ErrorResponse2(`Organization with ID "${companyId}" not found`, 404 /* Not_Found */);
     }
     let membership = await prisma.membership.findFirst({
       where: {
@@ -16701,7 +16774,7 @@ var CompanyDirectoryService = class {
     const hashedPassword = hashPassword2(rawPassword);
     const targetEmail = cleanEmail || adminUser?.email || organization.email || platformCompany?.contactEmail;
     if (!targetEmail) {
-      throw new ErrorResponse("An email address must be specified for the organization admin", 400 /* Bad_Request */);
+      throw new ErrorResponse2("An email address must be specified for the organization admin", 400 /* Bad_Request */);
     }
     if (adminUser && adminUser.email && adminUser.email.toLowerCase() !== targetEmail.toLowerCase()) {
       const emailConflict = await prisma.user.findFirst({
@@ -16711,7 +16784,7 @@ var CompanyDirectoryService = class {
         }
       });
       if (emailConflict) {
-        throw new ErrorResponse(`Email "${targetEmail}" is already registered to another user`, 409 /* Conflict */);
+        throw new ErrorResponse2(`Email "${targetEmail}" is already registered to another user`, 409 /* Conflict */);
       }
     }
     if (!adminUser) {
@@ -16885,7 +16958,7 @@ var CompanyDirectoryService = class {
       }
     }
     if (!organization) {
-      throw new ErrorResponse(`Organization with ID "${companyId}" not found`, 404 /* Not_Found */);
+      throw new ErrorResponse2(`Organization with ID "${companyId}" not found`, 404 /* Not_Found */);
     }
     let membership = await prisma.membership.findFirst({
       where: {
@@ -17270,7 +17343,7 @@ var PayrollService = class {
   static async updateCycleStatus(id, status, organizationId) {
     const cycle = await prisma.payrollCycle.findUnique({ where: { id } });
     if (!cycle) {
-      throw new ErrorResponse("Payroll cycle not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Payroll cycle not found", 404 /* Not_Found */);
     }
     const cycleOrgId = organizationId || cycle.organizationId || void 0;
     if (status === "PROCESSING_SALARIES" && cycle.status === "PENDING_ATTENDANCE_LOCK") {
@@ -17327,7 +17400,7 @@ var PayrollService = class {
   static async calculateArrears(cycleId, organizationId) {
     const cycle = await prisma.payrollCycle.findUnique({ where: { id: cycleId } });
     if (!cycle) {
-      throw new ErrorResponse("Payroll cycle not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Payroll cycle not found", 404 /* Not_Found */);
     }
     const cycleOrgId = organizationId || cycle.organizationId || void 0;
     const runs = await PayrollRepository.findRunsForCycle(cycle.id);
@@ -17360,7 +17433,7 @@ var PayrollService = class {
       where: empWhere
     });
     if (employees.length === 0) {
-      throw new ErrorResponse("No active employees found to revise", 404 /* Not_Found */);
+      throw new ErrorResponse2("No active employees found to revise", 404 /* Not_Found */);
     }
     const factor = 1 + incrementPercentage / 100;
     for (const emp of employees) {
@@ -17387,7 +17460,7 @@ var PayrollService = class {
   static async toggleStopPayment(employeeId, cycleId, reason, organizationId) {
     const cycle = await prisma.payrollCycle.findUnique({ where: { id: cycleId } });
     if (!cycle) {
-      throw new ErrorResponse("Payroll cycle not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Payroll cycle not found", 404 /* Not_Found */);
     }
     const cycleOrgId = organizationId || cycle.organizationId || void 0;
     const existing = await PayrollRepository.findExclusion(employeeId, cycleId);
@@ -17410,7 +17483,7 @@ var PayrollService = class {
   static async applyLoan(employeeId, principal, emi, purpose, organizationId) {
     const employee = await prisma.employee.findUnique({ where: { id: employeeId } });
     if (!employee) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     const loanOrgId = organizationId || employee.organizationId || null;
     const loan = await PayrollRepository.createLoan({
@@ -17437,7 +17510,7 @@ var PayrollService = class {
   static async saveTaxDeclaration(employeeId, financialYear, declarationData, organizationId) {
     const employee = await prisma.employee.findUnique({ where: { id: employeeId } });
     if (!employee) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     const decOrgId = organizationId || employee.organizationId || null;
     return PayrollRepository.upsertTaxDeclaration(employeeId, financialYear, {
@@ -17736,7 +17809,7 @@ var PerformanceService = class {
   static async createGoal(data, organizationId) {
     const employee = await prisma.employee.findUnique({ where: { id: data.employeeId } });
     if (!employee) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     const empOrgId = organizationId || employee.organizationId || null;
     return PerformanceRepository.createGoal({
@@ -17747,7 +17820,7 @@ var PerformanceService = class {
   static async updateGoalProgress(id, progress, status) {
     const goal = await PerformanceRepository.findGoalById(id);
     if (!goal) {
-      throw new ErrorResponse("Goal not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Goal not found", 404 /* Not_Found */);
     }
     const resolvedStatus = status || (progress === 100 ? "Completed" : "In Progress");
     return PerformanceRepository.updateGoal(id, { progress, status: resolvedStatus });
@@ -17755,7 +17828,7 @@ var PerformanceService = class {
   static async deleteGoal(id) {
     const goal = await PerformanceRepository.findGoalById(id);
     if (!goal) {
-      throw new ErrorResponse("Goal not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Goal not found", 404 /* Not_Found */);
     }
     return PerformanceRepository.deleteGoal(id);
   }
@@ -17775,7 +17848,7 @@ var PerformanceService = class {
   static async createFeedback(data, organizationId) {
     const employee = await prisma.employee.findUnique({ where: { id: data.employeeId } });
     if (!employee) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     const empOrgId = organizationId || employee.organizationId || null;
     return PerformanceRepository.createFeedback({
@@ -17787,7 +17860,7 @@ var PerformanceService = class {
   static async saveAppraisal(employeeId, cycle, rating, organizationId) {
     const employee = await prisma.employee.findUnique({ where: { id: employeeId } });
     if (!employee) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     const empOrgId = organizationId || employee.organizationId || void 0;
     return PerformanceRepository.upsertAppraisal(employeeId, cycle, rating, empOrgId);
@@ -18195,21 +18268,21 @@ var RecruitmentService = class {
   static async advanceCandidate(id, stage) {
     const candidate = await RecruitmentRepository.findCandidateById(id);
     if (!candidate) {
-      throw new ErrorResponse("Candidate not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Candidate not found", 404 /* Not_Found */);
     }
     return RecruitmentRepository.updateCandidateStage(id, stage);
   }
   static async updateCandidateChecklist(id, data) {
     const candidate = await RecruitmentRepository.findCandidateById(id);
     if (!candidate) {
-      throw new ErrorResponse("Candidate not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Candidate not found", 404 /* Not_Found */);
     }
     return RecruitmentRepository.updateCandidateChecklist(id, data);
   }
   static async rejectCandidate(id) {
     const candidate = await RecruitmentRepository.findCandidateById(id);
     if (!candidate) {
-      throw new ErrorResponse("Candidate not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Candidate not found", 404 /* Not_Found */);
     }
     return RecruitmentRepository.deleteCandidate(id);
   }
@@ -18333,7 +18406,7 @@ var SubscriptionService = class {
   static async getPlanDetails(idOrCode) {
     const plan = await SubscriptionRepository.findPlanByIdOrCode(idOrCode);
     if (!plan) {
-      throw new ErrorResponse("Subscription plan not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Subscription plan not found", 404 /* Not_Found */);
     }
     return plan;
   }
@@ -18374,11 +18447,11 @@ var SubscriptionService = class {
   static async subscribeOrUpgrade(userOrgId, data) {
     const targetOrgId = data.organizationId || userOrgId;
     if (!targetOrgId) {
-      throw new ErrorResponse("Organization context is required for subscription", 400 /* Bad_Request */);
+      throw new ErrorResponse2("Organization context is required for subscription", 400 /* Bad_Request */);
     }
     const plan = await SubscriptionRepository.findPlanByIdOrCode(data.planId);
     if (!plan) {
-      throw new ErrorResponse("Target subscription plan does not exist", 404 /* Not_Found */);
+      throw new ErrorResponse2("Target subscription plan does not exist", 404 /* Not_Found */);
     }
     const subscription = await SubscriptionRepository.createOrganizationSubscription({
       organizationId: targetOrgId,
@@ -18404,7 +18477,7 @@ var SubscriptionService = class {
   static async createPlan(data) {
     const existing = await SubscriptionRepository.findPlanByIdOrCode(data.code);
     if (existing) {
-      throw new ErrorResponse(`Plan code '${data.code}' already exists`, 400 /* Bad_Request */);
+      throw new ErrorResponse2(`Plan code '${data.code}' already exists`, 400 /* Bad_Request */);
     }
     return SubscriptionRepository.createPlan(data);
   }
@@ -18414,7 +18487,7 @@ var SubscriptionService = class {
   static async updatePlan(id, data) {
     const existing = await SubscriptionRepository.findPlanByIdOrCode(id);
     if (!existing) {
-      throw new ErrorResponse("Subscription plan not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Subscription plan not found", 404 /* Not_Found */);
     }
     return SubscriptionRepository.updatePlan(existing.id, data);
   }
@@ -18424,7 +18497,7 @@ var SubscriptionService = class {
   static async deletePlan(id) {
     const existing = await SubscriptionRepository.findPlanByIdOrCode(id);
     if (!existing) {
-      throw new ErrorResponse("Subscription plan not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Subscription plan not found", 404 /* Not_Found */);
     }
     return SubscriptionRepository.deletePlan(existing.id);
   }
@@ -18667,7 +18740,7 @@ var TimesheetService = class {
   static async submitTimesheet(data, organizationId) {
     const employee = await prisma.employee.findUnique({ where: { id: data.employeeId } });
     if (!employee) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     const totalHours = data.monHours + data.tueHours + data.wedHours + data.thuHours + data.friHours;
     const tsOrgId = organizationId || employee.organizationId || null;
@@ -18680,7 +18753,7 @@ var TimesheetService = class {
   static async updateTimesheetStatus(id, status) {
     const timesheet = await TimesheetRepository.findTimesheetById(id);
     if (!timesheet) {
-      throw new ErrorResponse("Timesheet entry not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Timesheet entry not found", 404 /* Not_Found */);
     }
     return TimesheetRepository.updateTimesheetStatus(id, status);
   }
@@ -18868,7 +18941,7 @@ var TravelService = class {
   static async applyClaim(data, organizationId) {
     const employee = await prisma.employee.findUnique({ where: { id: data.employeeId } });
     if (!employee) {
-      throw new ErrorResponse("Employee not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Employee not found", 404 /* Not_Found */);
     }
     const claimOrgId = organizationId || employee.organizationId || null;
     return TravelRepository.createClaim({
@@ -18879,7 +18952,7 @@ var TravelService = class {
   static async updateClaimStatus(id, status) {
     const claim = await TravelRepository.findClaimById(id);
     if (!claim) {
-      throw new ErrorResponse("Expense claim not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Expense claim not found", 404 /* Not_Found */);
     }
     return TravelRepository.updateClaimStatus(id, status);
   }
@@ -19163,20 +19236,20 @@ var verifyOtp = asyncHandler(async (req, res, next) => {
     where: { phone }
   });
   if (!loginOtp) {
-    return next(new ErrorResponse("OTP record not found", 404 /* Not_Found */));
+    return next(new ErrorResponse2("OTP record not found", 404 /* Not_Found */));
   }
   if (/* @__PURE__ */ new Date() > new Date(loginOtp.expiresAt)) {
-    return next(new ErrorResponse("OTP has expired", 400 /* Bad_Request */));
+    return next(new ErrorResponse2("OTP has expired", 400 /* Bad_Request */));
   }
   if (loginOtp.attempts >= 5) {
-    return next(new ErrorResponse("Too many incorrect attempts. Please request a new OTP.", 429 /* Too_Many_Requests */));
+    return next(new ErrorResponse2("Too many incorrect attempts. Please request a new OTP.", 429 /* Too_Many_Requests */));
   }
   if (loginOtp.otp !== otp) {
     await prisma.loginOtp.update({
       where: { phone },
       data: { attempts: { increment: 1 } }
     });
-    return next(new ErrorResponse("Invalid OTP code", 400 /* Bad_Request */));
+    return next(new ErrorResponse2("Invalid OTP code", 400 /* Bad_Request */));
   }
   await prisma.loginOtp.update({
     where: { phone },
@@ -19217,7 +19290,7 @@ var verifyOtp = asyncHandler(async (req, res, next) => {
   const membership = await getActiveMembership(user.id);
   if (!membership || !membership.organizations) {
     return next(
-      new ErrorResponse(
+      new ErrorResponse2(
         "Organization does not exist in the database. Please onboard your organization first.",
         403 /* Forbidden */
       )
@@ -19267,7 +19340,7 @@ var register = asyncHandler(async (req, res, next) => {
   });
   if (existingUser) {
     const field = existingUser.email === email ? "Email" : "Phone number";
-    return next(new ErrorResponse(`${field} is already registered`, 409 /* Conflict */));
+    return next(new ErrorResponse2(`${field} is already registered`, 409 /* Conflict */));
   }
   const newUser = await prisma.user.create({
     data: {
@@ -19425,7 +19498,7 @@ var login = asyncHandler(async (req, res, next) => {
     }
   }
   if (!user || !passwordMatches) {
-    return next(new ErrorResponse("Invalid credentials", 401 /* Unauthorized */));
+    return next(new ErrorResponse2("Invalid credentials", 401 /* Unauthorized */));
   }
   let membership = await getActiveMembership(user.id);
   if (!membership || !membership.organizations) {
@@ -19461,7 +19534,7 @@ var login = asyncHandler(async (req, res, next) => {
   }
   if (!membership || !membership.organizations) {
     return next(
-      new ErrorResponse(
+      new ErrorResponse2(
         "Organization does not exist in the database. Please onboard your organization first.",
         403 /* Forbidden */
       )
@@ -19512,7 +19585,7 @@ var login = asyncHandler(async (req, res, next) => {
 });
 var getProfile = asyncHandler(async (req, res, next) => {
   if (!req.user) {
-    return next(new ErrorResponse("Not authorized to access this route", 401 /* Unauthorized */));
+    return next(new ErrorResponse2("Not authorized to access this route", 401 /* Unauthorized */));
   }
   let employee = await prisma.employee.findUnique({
     where: { userId: req.user.id }
@@ -19597,7 +19670,7 @@ var AdminUserService = class {
   static async createAdmin(input) {
     const existingAdmin = await AdminUserRepository.findByEmail(input.email);
     if (existingAdmin) {
-      throw new ErrorResponse("Admin with this email already exists", 400 /* Bad_Request */);
+      throw new ErrorResponse2("Admin with this email already exists", 400 /* Bad_Request */);
     }
     const hashedPassword = hashPassword4(input.password);
     const admin = await AdminUserRepository.create({
@@ -19609,7 +19682,7 @@ var AdminUserService = class {
       status: input.status
     });
     if (!admin) {
-      throw new ErrorResponse("Failed to create admin user", 500 /* Internal_Server_Error */);
+      throw new ErrorResponse2("Failed to create admin user", 500 /* Internal_Server_Error */);
     }
     const token = signToken(
       {
@@ -19635,14 +19708,14 @@ var AdminUserService = class {
     const cleanPassword = (input.password || "").trim();
     const admin = await AdminUserRepository.findByEmail(cleanEmail);
     if (!admin) {
-      throw new ErrorResponse("Invalid email or password", 401 /* Unauthorized */);
+      throw new ErrorResponse2("Invalid email or password", 401 /* Unauthorized */);
     }
     if (admin.status === "Inactive" || admin.status === "Suspended") {
-      throw new ErrorResponse(`Account is ${admin.status.toLowerCase()}. Contact platform support.`, 403 /* Forbidden */);
+      throw new ErrorResponse2(`Account is ${admin.status.toLowerCase()}. Contact platform support.`, 403 /* Forbidden */);
     }
     const isMatch = comparePassword(cleanPassword, admin.password);
     if (!isMatch) {
-      throw new ErrorResponse("Invalid email or password", 401 /* Unauthorized */);
+      throw new ErrorResponse2("Invalid email or password", 401 /* Unauthorized */);
     }
     await AdminUserRepository.updateLastLogin(admin.id);
     const token = signToken(
@@ -19667,7 +19740,7 @@ var AdminUserService = class {
   static async getAdminProfile(id) {
     const admin = await AdminUserRepository.findById(id);
     if (!admin) {
-      throw new ErrorResponse("Admin user not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Admin user not found", 404 /* Not_Found */);
     }
     const { password, ...adminWithoutPassword } = admin;
     return adminWithoutPassword;
@@ -19737,7 +19810,7 @@ var loginAdmin = asyncHandler(async (req, res, next) => {
 var getAdminProfile = asyncHandler(async (req, res, next) => {
   const adminId = req.user?.id;
   if (!adminId) {
-    return next(new ErrorResponse("Unauthorized. Please log in.", 401 /* Unauthorized */));
+    return next(new ErrorResponse2("Unauthorized. Please log in.", 401 /* Unauthorized */));
   }
   const profile = await AdminUserService.getAdminProfile(adminId);
   return SuccessResponse(
@@ -19793,11 +19866,11 @@ var PlatformService = class {
       });
     }
     if (!admin) {
-      throw new ErrorResponse("Invalid email or password", 401 /* Unauthorized */);
+      throw new ErrorResponse2("Invalid email or password", 401 /* Unauthorized */);
     }
     const isMatch = comparePassword2(password, admin.password) || admin.password === password;
     if (!isMatch) {
-      throw new ErrorResponse("Invalid email or password", 401 /* Unauthorized */);
+      throw new ErrorResponse2("Invalid email or password", 401 /* Unauthorized */);
     }
     const jwtSecret = env_config_default.jwt.secret || "123456";
     const token = signToken(
@@ -19817,7 +19890,7 @@ var PlatformService = class {
   static async getProfile(adminId) {
     const admin = await PlatformRepository.findById(adminId);
     if (!admin) {
-      throw new ErrorResponse("Platform admin not found", 404 /* Not_Found */);
+      throw new ErrorResponse2("Platform admin not found", 404 /* Not_Found */);
     }
     return {
       id: admin.id,
@@ -19857,7 +19930,7 @@ var platformLogin = asyncHandler(async (req, res, next) => {
 });
 var getPlatformMe = asyncHandler(async (req, res, next) => {
   if (!req.user) {
-    return next(new ErrorResponse("Not authorized", 401 /* Unauthorized */));
+    return next(new ErrorResponse2("Not authorized", 401 /* Unauthorized */));
   }
   const admin = await PlatformService.getProfile(req.user.id);
   return SuccessResponse(

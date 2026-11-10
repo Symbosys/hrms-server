@@ -129,6 +129,9 @@ export class AttendanceService {
     organizationId?: string,
     requestingUser?: any
   ) {
+    // Auto punch-out any pending punch-in that exceeded 15 hours or shift end before creating a new punch
+    await this.autoPunchOutPendingUsers(organizationId);
+
     let userEmp: any = null;
     if (requestingUser) {
       const userConditions: any[] = [];
@@ -563,19 +566,31 @@ export class AttendanceService {
   }
 
   /**
-   * Automatic punch-out for employees who punched In but forgot to punch Out by midnight (12:00 AM).
-   * Runs as a background task, on server startup, and prior to querying attendance records.
+   * Automatic punch-out for employees who punched In but forgot to punch Out:
+   * 1. After 15 hours from punch-in, OR for previous days' pending punches.
+   * 2. Automatically respects the employee's assigned shift timing (AM/PM and night shifts).
+   * 3. Accurately calculates Indian Standard Time (IST / UTC+05:30) timestamp to prevent
+   *    server UTC offsets from bleeding into the next morning at 5:29 AM.
    */
   static async autoPunchOutPendingUsers(organizationId?: string) {
     try {
       const now = new Date();
-      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      const fifteenHoursAgo = new Date(now.getTime() - 15 * 60 * 60 * 1000);
 
-      // Find all In punches created before today
+      // Start of today in IST
+      const nowISTStr = now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
+      const nowIST = new Date(nowISTStr);
+      const startOfTodayISTMs = Date.UTC(nowIST.getFullYear(), nowIST.getMonth(), nowIST.getDate(), 0, 0, 0) - (5.5 * 60 * 60 * 1000);
+      const startOfTodayIST = new Date(startOfTodayISTMs);
+
+      // Find all In punches created before today in IST OR exceeding 15 hours
       const pendingInPunches = await prisma.attendancePunch.findMany({
         where: {
           type: { in: ["In", "IN", "in"] },
-          createdAt: { lt: startOfToday },
+          OR: [
+            { createdAt: { lt: startOfTodayIST } },
+            { createdAt: { lte: fifteenHoursAgo } },
+          ],
           ...(organizationId
             ? {
                 employee: {
@@ -587,40 +602,148 @@ export class AttendanceService {
         orderBy: { createdAt: "asc" },
       });
 
+      const daysOfWeek = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
+
       for (const inPunch of pendingInPunches) {
         const punchCreatedAt = new Date(inPunch.createdAt);
-        const startOfDay = new Date(punchCreatedAt.getFullYear(), punchCreatedAt.getMonth(), punchCreatedAt.getDate(), 0, 0, 0, 0);
-        const endOfDay = new Date(punchCreatedAt.getFullYear(), punchCreatedAt.getMonth(), punchCreatedAt.getDate(), 23, 59, 59, 999);
+
+        // Check if an Out punch was already recorded after this In punch
+        const nextInPunch = await prisma.attendancePunch.findFirst({
+          where: {
+            employeeId: inPunch.employeeId,
+            type: { in: ["In", "IN", "in"] },
+            createdAt: { gt: punchCreatedAt },
+          },
+          orderBy: { createdAt: "asc" },
+        });
 
         const hasOut = await prisma.attendancePunch.findFirst({
           where: {
             employeeId: inPunch.employeeId,
             type: { in: ["Out", "OUT", "out"] },
             createdAt: {
-              gte: startOfDay,
-              lte: new Date(endOfDay.getTime() + 60 * 60 * 1000), // up to 1hr past midnight
+              gte: punchCreatedAt,
+              ...(nextInPunch
+                ? { lt: nextInPunch.createdAt }
+                : { lte: new Date(punchCreatedAt.getTime() + 24 * 60 * 60 * 1000) }),
             },
           },
         });
 
-        if (!hasOut) {
-          const midnight = endOfDay;
-          const diffMs = midnight.getTime() - punchCreatedAt.getTime();
+        if (hasOut) continue;
+
+        // Fetch Employee and their assigned Shift Roster
+        const emp = await prisma.employee.findUnique({
+          where: { id: inPunch.employeeId },
+        });
+
+        // Determine punch day of week in IST
+        const inPunchIST = new Date(punchCreatedAt.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+        const punchDayKey = daysOfWeek[inPunchIST.getDay()] ?? "mon";
+
+        const roster = await prisma.shiftRoster.findFirst({
+          where: {
+            OR: [
+              { employeeId: inPunch.employeeId },
+              ...(emp?.userId ? [{ employeeId: emp.userId }] : []),
+            ],
+          },
+          orderBy: { updatedAt: "desc" },
+        });
+
+        let assignedShift: any = null;
+        if (roster && (roster as any)[punchDayKey]) {
+          const shiftCode = String((roster as any)[punchDayKey]).trim();
+          if (shiftCode && !["OFF", "WEEK OFF", "WEEKOFF", "WO"].includes(shiftCode.toUpperCase())) {
+            assignedShift = await prisma.shift.findFirst({
+              where: {
+                OR: [
+                  { code: { equals: shiftCode, mode: "insensitive" } },
+                  { name: { equals: shiftCode, mode: "insensitive" } },
+                ],
+                ...(emp?.organizationId ? { organizationId: emp.organizationId } : {}),
+              },
+            });
+          }
+        }
+
+        let outTimestamp: Date;
+        let timeString: string;
+        let methodString: string;
+
+        const punchYear = inPunchIST.getFullYear();
+        const punchMonth = inPunchIST.getMonth();
+        const punchDay = inPunchIST.getDate();
+
+        if (assignedShift?.endTime) {
+          // Parse Shift Start & End (considering AM / PM)
+          const shiftEndMins = parseTimeToMinutes(assignedShift.endTime);
+          const shiftStartMins = assignedShift.startTime ? parseTimeToMinutes(assignedShift.startTime) : 9 * 60 + 30;
+          const isNightShift = shiftEndMins < shiftStartMins;
+
+          const targetDay = isNightShift ? punchDay + 1 : punchDay;
+          const endHour = Math.floor(shiftEndMins / 60);
+          const endMinute = shiftEndMins % 60;
+
+          // Convert IST wall clock time to UTC Date timestamp
+          const shiftEndUtcMs = Date.UTC(punchYear, punchMonth, targetDay, endHour, endMinute, 0) - (5.5 * 60 * 60 * 1000);
+          const calculatedShiftEndDate = new Date(shiftEndUtcMs);
+
+          // If punch-in was done AFTER shift end time, fallback to punch-in + 15 hours (or now)
+          if (calculatedShiftEndDate.getTime() > punchCreatedAt.getTime()) {
+            outTimestamp = calculatedShiftEndDate;
+            const diffMs = outTimestamp.getTime() - punchCreatedAt.getTime();
+            const workedHours = (diffMs / (1000 * 60 * 60)).toFixed(1);
+
+            let displayHour = endHour % 12 || 12;
+            const ampm = endHour >= 12 ? "PM" : "AM";
+            const formattedTime = `${displayHour.toString().padStart(2, "0")}:${endMinute.toString().padStart(2, "0")} ${ampm}`;
+
+            timeString = `${formattedTime} (Auto Punch-Out)`;
+            methodString = `Auto Punch-Out (Shift End: ${assignedShift.name || assignedShift.code} - Worked: ${workedHours}h)`;
+          } else {
+            // Fallback: 15 hours after punch-in
+            const targetMs = Math.min(punchCreatedAt.getTime() + 15 * 60 * 60 * 1000, now.getTime());
+            outTimestamp = new Date(targetMs);
+            const diffMs = outTimestamp.getTime() - punchCreatedAt.getTime();
+            const workedHours = (diffMs / (1000 * 60 * 60)).toFixed(1);
+
+            const outIST = new Date(outTimestamp.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+            let displayHour = outIST.getHours() % 12 || 12;
+            const ampm = outIST.getHours() >= 12 ? "PM" : "AM";
+            const formattedTime = `${displayHour.toString().padStart(2, "0")}:${outIST.getMinutes().toString().padStart(2, "0")} ${ampm}`;
+
+            timeString = `${formattedTime} (Auto Punch-Out)`;
+            methodString = `Auto Punch-Out (15h Timeout - Worked: ${workedHours}h)`;
+          }
+        } else {
+          // No shift assigned: 15 hours timeout from punch-in
+          const targetMs = Math.min(punchCreatedAt.getTime() + 15 * 60 * 60 * 1000, now.getTime());
+          outTimestamp = new Date(targetMs);
+          const diffMs = outTimestamp.getTime() - punchCreatedAt.getTime();
           const workedHours = (diffMs / (1000 * 60 * 60)).toFixed(1);
 
-          await prisma.attendancePunch.create({
-            data: {
-              employeeId: inPunch.employeeId,
-              type: "Out",
-              method: `Auto Punch-Out (System 12:00 AM - Worked: ${workedHours}h)`,
-              time: "12:00 AM (Auto Punch-Out)",
-              lat: inPunch.lat || 0,
-              lng: inPunch.lng || 0,
-              createdAt: midnight,
-              updatedAt: midnight,
-            },
-          });
+          const outIST = new Date(outTimestamp.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+          let displayHour = outIST.getHours() % 12 || 12;
+          const ampm = outIST.getHours() >= 12 ? "PM" : "AM";
+          const formattedTime = `${displayHour.toString().padStart(2, "0")}:${outIST.getMinutes().toString().padStart(2, "0")} ${ampm}`;
+
+          timeString = `${formattedTime} (Auto Punch-Out)`;
+          methodString = `Auto Punch-Out (15h Timeout - Worked: ${workedHours}h)`;
         }
+
+        await prisma.attendancePunch.create({
+          data: {
+            employeeId: inPunch.employeeId,
+            type: "Out",
+            method: methodString,
+            time: timeString,
+            lat: inPunch.lat || 0,
+            lng: inPunch.lng || 0,
+            createdAt: outTimestamp,
+            updatedAt: outTimestamp,
+          },
+        });
       }
     } catch (err) {
       console.error("[AttendanceService] Error in autoPunchOutPendingUsers:", err);

@@ -1,7 +1,7 @@
 import type { Response, NextFunction } from "express";
 import type { AuthenticatedRequest } from "../../../middlewares/auth.middleware.ts";
 import { EngagementService } from "../services/engagement.service.ts";
-import { SuccessResponse } from "../../../utils/response.util.ts";
+import { SuccessResponse, ErrorResponse } from "../../../utils/response.util.ts";
 import { asyncHandler } from "../../../middlewares/error.middleware.ts";
 import { statusCode } from "../../../types/types.ts";
 import {
